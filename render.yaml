@@ -4,7 +4,7 @@ services:
     runtime: static
     branch: main
     plan: free
-    staticPublishPath: .
+    staticPublishPath: ./publish
     autoDeployTrigger: commit
     envVars:
       - key: API_BASE
