@@ -4,17 +4,14 @@ services:
     runtime: static
     branch: main
     plan: free
-    buildCommand: echo "static site"
-    publish: .
-    route:
-      - type: http
-        source: /
-        match: /
-        destination: /index.html
-    healthCheckPath: /index.html
-    autoDeploy: true
+    staticPublishPath: .
+    autoDeployTrigger: commit
     envVars:
       - key: API_BASE
         value: https://lubuntu.tail239f3d.ts.net/v1
       - key: API_KEY
         value: [REDACTED]
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
