@@ -76,6 +76,7 @@
     <span class="spacer"></span>
     <button class="btn" id="selfBtn" type="button">SELF: OFF</button>
     <button class="btn" id="sideBtn" type="button">SELF TALK ▸</button>
+    <button class="btn" id="apiBtn" type="button">API ⚙</button>
     <button class="btn" id="clearBtn" type="button">clear</button>
   </div>
   <div id="log" aria-live="polite"></div>
@@ -88,10 +89,30 @@
   </div>
   <p id="photoNote" style="margin:6px 14px 0;color:var(--dim);font-size:12px;display:none;"></p>
 </div>
+
+<!-- API settings window -->
+<div id="apiOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:60;display:none;"></div>
+<div id="apiModal" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.95);background:#0d120f;border:1px solid var(--border);border-radius:8px;padding:18px;width:440px;max-width:92vw;z-index:61;display:none;box-shadow:0 12px 40px rgba(0,0,0,0.6);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <span style="color:var(--accent);font-weight:700;">API Settings</span>
+    <button class="btn" id="apiClose" type="button">×</button>
+  </div>
+  <label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px;">API Base URL</label>
+  <input id="apiBase" type="text" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;margin-bottom:14px;">
+  <label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px;">API Key</label>
+  <input id="apiKey" type="password" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;margin-bottom:14px;">
+  <div style="display:flex;gap:8px;justify-content:flex-end;">
+    <button class="btn" id="apiReset" type="button">Reset to default</button>
+    <button class="btn" id="apiSave" type="button">Save</button>
+  </div>
+</div>
+
 <script>
 (function () {
-  const API_BASE = 'https://lubuntu.tail239f3d.ts.net/v1';
-  const API_KEY = '[REDACTED]';
+  const DEFAULT_BASE = 'https://lubuntu.tail239f3d.ts.net/v1';
+  const DEFAULT_KEY = '[REDACTED]';
+  const API_BASE = localStorage.getItem('harold_api_base') || DEFAULT_BASE;
+  const API_KEY = localStorage.getItem('harold_api_key') || DEFAULT_KEY;
   const MODEL = 'harold';
 
   const log = document.getElementById('log');
@@ -243,6 +264,44 @@
     history.length = 0;
     addLine('Session cleared.', 'sys');
     input.focus();
+  });
+
+  // ---- API settings window ----
+  const apiBtn = document.getElementById('apiBtn');
+  const apiOverlay = document.getElementById('apiOverlay');
+  const apiModal = document.getElementById('apiModal');
+  const apiBase = document.getElementById('apiBase');
+  const apiKey = document.getElementById('apiKey');
+  const apiClose = document.getElementById('apiClose');
+  const apiSave = document.getElementById('apiSave');
+  const apiReset = document.getElementById('apiReset');
+
+  function openApi() {
+    apiBase.value = API_BASE;
+    apiKey.value = API_KEY;
+    apiOverlay.style.display = 'block';
+    apiModal.style.display = 'block';
+    setTimeout(function () { apiBase.focus(); }, 50);
+  }
+  function closeApi() {
+    apiOverlay.style.display = 'none';
+    apiModal.style.display = 'none';
+  }
+  apiBtn.addEventListener('click', openApi);
+  apiClose.addEventListener('click', closeApi);
+  apiOverlay.addEventListener('click', closeApi);
+  apiSave.addEventListener('click', function () {
+    const base = apiBase.value.trim().replace(/\/$/, '');
+    const key = apiKey.value.trim();
+    if (!base) { addLine('API Base URL is required.', 'err'); apiBase.focus(); return; }
+    localStorage.setItem('harold_api_base', base);
+    localStorage.setItem('harold_api_key', key);
+    addLine('API settings saved for this session. New values take effect on the next request.', 'sys');
+    closeApi();
+  });
+  apiReset.addEventListener('click', function () {
+    apiBase.value = DEFAULT_BASE;
+    apiKey.value = DEFAULT_KEY;
   });
 
   // ---- photo upload / enhance ----
