@@ -41,6 +41,31 @@
   #send { background: #102417; color: var(--accent); border: 1px solid var(--border); border-radius: 4px; padding: 8px 14px; font: inherit; cursor: pointer; height: 38px; }
   #send:hover { border-color: var(--accent); }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
+  .self { color: #ffd27a; }
+  .self::before { content: "self> "; color: #ffd27a; }
+  .img-line { margin: 4px 0 10px 0; }
+  .img-line img { max-width: 100%; max-height: 60vh; height: auto; border-radius: 4px; border: 1px solid var(--border); }
+  .img-line a { color: var(--accent); }
+  /* Side self-talk window */
+  #sidePanel {
+    position: fixed; top: 0; right: 0; width: 380px; max-width: 92vw; height: 100%;
+    background: #0a0e0a; border-left: 1px solid var(--border); box-shadow: -12px 0 40px rgba(0,0,0,0.6);
+    display: none; flex-direction: column; z-index: 50; transform: translateX(100%);
+    transition: transform 0.25s ease;
+  }
+  #sidePanel.open { display: flex; transform: translateX(0); }
+  #sideHead { padding: 10px 14px; border-bottom: 1px solid var(--border); background: #0d120f; display: flex; gap: 8px; align-items: center; }
+  #sideHead .title { color: #ffd27a; font-weight: 700; font-size: 13px; }
+  #sideLog { flex: 1; overflow-y: auto; padding: 12px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  #sideLog .line { margin: 0 0 6px 0; font-size: 13px; }
+  #sideLog .self { color: #ffe9c2; }
+  #sideLog .self::before { content: "harold(self)> "; color: #ffd27a; }
+  #sideLog .sys { color: var(--dim); font-size: 12px; }
+  #sideLog .user { color: #e8ffe9; }
+  #sideLog .user::before { content: "you> "; color: var(--accent); }
+  #sideLog .err { color: var(--error); }
+  #sideOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 40; display: none; }
+  #sideOverlay.show { display: block; }
 </style>
 </head>
 <body>
@@ -49,14 +74,19 @@
     <span class="title">HAROLD TERMINAL</span>
     <span id="status" class="status">ready</span>
     <span class="spacer"></span>
+    <button class="btn" id="selfBtn" type="button">SELF: OFF</button>
+    <button class="btn" id="sideBtn" type="button">SELF TALK ▸</button>
     <button class="btn" id="clearBtn" type="button">clear</button>
   </div>
   <div id="log" aria-live="polite"></div>
   <div class="prompt">
-    <div class="ps1">&gt;</div>
+    <div class="ps1" id="ps1">&gt;</div>
     <textarea id="input" rows="1" placeholder="Type a message and press Enter..." spellcheck="false"></textarea>
+    <input type="file" id="photo" accept="image/jpeg,image/png,image/webp" hidden>
+    <button id="photoBtn" type="button" title="Upload photo to enhance">📷</button>
     <button id="send" type="button">Send</button>
   </div>
+  <p id="photoNote" style="margin:6px 14px 0;color:var(--dim);font-size:12px;display:none;"></p>
 </div>
 <script>
 (function () {
@@ -80,7 +110,53 @@
   function addLine(text, cls) {
     const div = document.createElement('div');
     div.className = 'line ' + (cls || '');
-    div.textContent = text;
+    // render markdown images: ![alt](url)
+    const imgRe = /!\[([^\]\n]*)\]\(([^\s<>"`]+)\)/g;
+    const linkRe = /\[([^\]\n]+)\]\(([^\s<>"`]+)\)/g;
+    const urlRe = /(?:https?:\/\/|www\.|geocities\.ws\/)[^\s<>"`]+/g;
+    if (imgRe.test(text) || linkRe.test(text) || urlRe.test(text)) {
+      const combined = new RegExp([imgRe.source, linkRe.source, urlRe.source].join('|'), 'gi');
+      let offset = 0;
+      for (const m of text.matchAll(combined)) {
+        if (m[0].startsWith('!')) {
+          const alt = m[1] || '';
+          const url = m[2];
+          div.appendChild(document.createTextNode(text.slice(offset, m.index)));
+          const img = document.createElement('img');
+          img.alt = alt;
+          img.className = 'img-line';
+          img.referrerPolicy = 'no-referrer';
+          img.addEventListener('error', () => { img.alt = 'Image failed: ' + url; });
+          img.src = url;
+          div.appendChild(img);
+          offset = m.index + m[0].length;
+        } else if (m[0].startsWith('[')) {
+          const label = m[1];
+          const url = m[2];
+          div.appendChild(document.createTextNode(text.slice(offset, m.index)));
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = label;
+          div.appendChild(a);
+          offset = m.index + m[0].length;
+        } else {
+          const url = m[0];
+          div.appendChild(document.createTextNode(text.slice(offset, m.index)));
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.textContent = url;
+          div.appendChild(a);
+          offset = m.index + url.length;
+        }
+      }
+      div.appendChild(document.createTextNode(text.slice(offset)));
+    } else {
+      div.textContent = text;
+    }
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
   }
@@ -99,17 +175,18 @@
     history.push({ role: 'user', content: text });
     busy = true;
     sendBtn.disabled = true;
-    setStatus('thinking...', '');
+    setStatus(selfMode ? 'self thinking...' : 'thinking...', '');
 
     try {
-      const res = await fetch(API_BASE + '/chat/completions', {
+      const endpoint = selfMode ? API_BASE + '/chat/completions?self=1' : API_BASE + '/chat/completions';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ' + API_KEY
         },
         body: JSON.stringify({
-          model: MODEL,
+          model: selfMode ? 'harold-chat' : MODEL,
           messages: history.slice(-20),
           temperature: 0.7
         })
@@ -127,7 +204,7 @@
         : '';
       const out = reply && String(reply).trim() ? String(reply).trim() : '(empty response)';
       history.push({ role: 'assistant', content: out });
-      addLine(out, 'bot');
+      addLine(out, selfMode ? 'self' : 'bot');
       setStatus('connected', 'ok');
     } catch (err) {
       addLine(String(err.message || err), 'err');
@@ -138,6 +215,20 @@
       input.focus();
     }
   }
+
+  // ---- SELF mode: Harold chats with himself ----
+  const selfBtn = document.getElementById('selfBtn');
+  let selfMode = false;
+  function setSelf(on) {
+    selfMode = on;
+    selfBtn.textContent = 'SELF: ' + (on ? 'ON' : 'OFF');
+    selfBtn.style.borderColor = on ? '#ffd27a' : '';
+    selfBtn.style.color = on ? '#ffd27a' : '';
+    ps1.textContent = on ? 'self>' : '>';
+    addLine(on ? 'SELF mode ON — Harold is talking to himself. Toggle off to return.' : 'SELF mode OFF — back to normal chat.', 'sys');
+    input.focus();
+  }
+  selfBtn.addEventListener('click', function () { setSelf(!selfMode); });
 
   input.addEventListener('input', autoResize);
   input.addEventListener('keydown', function (e) {
@@ -154,9 +245,158 @@
     input.focus();
   });
 
+  // ---- photo upload / enhance ----
+  const photoInput = document.getElementById('photo');
+  const photoBtn = document.getElementById('photoBtn');
+  const photoNote = document.getElementById('photoNote');
+  const BACKEND = 'https://lubuntu.tail239f3d.ts.net';
+
+  function note(text) {
+    photoNote.textContent = text;
+    photoNote.style.display = text ? 'block' : 'none';
+  }
+
+  photoBtn.addEventListener('click', function () { photoInput.click(); });
+
+  photoInput.addEventListener('change', async function () {
+    const file = photoInput.files && photoInput.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      note('Photo must be 10 MB or smaller.');
+      photoInput.value = '';
+      return;
+    }
+    addLine('Enhance uploaded photo: ' + file.name, 'user');
+    photoBtn.disabled = true;
+    setStatus('enhancing photo...', '');
+    note('Improves contrast, color, and sharpness; not AI retouching. Original unchanged.');
+    const body = new FormData();
+    body.append('file', file);
+    try {
+      const res = await fetch(BACKEND + '/api/images/enhance', {
+        method: 'POST', body, signal: AbortSignal.timeout(90000)
+      });
+      let data = null;
+      try { data = await res.json(); } catch (e) { data = null; }
+      if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+      if (data.ok !== true || !/^\/images\/enhanced-[a-f0-9]{32}\.jpg$/.test(data.url)) {
+        throw new Error('Unexpected photo response');
+      }
+      const url = BACKEND + data.url;
+      addLine((data.message || 'Enhanced photo ready.') + '\n![Enhanced photo](' + url + ')\n[Download](' + url + ')', 'bot');
+      setStatus('connected', 'ok');
+      note('');
+    } catch (err) {
+      addLine('Could not enhance photo: ' + (err.message || err), 'err');
+      setStatus('error', 'bad');
+    } finally {
+      photoBtn.disabled = false;
+      photoInput.value = '';
+      input.focus();
+    }
+  });
+
   addLine('Harold terminal ready. Type a message and press Enter.', 'sys');
   setStatus('ready', 'ok');
   input.focus();
+})();
+
+// ---- Side self-talk window ----
+(function () {
+  const sideBtn = document.getElementById('sideBtn');
+  const panel = document.createElement('div');
+  panel.id = 'sidePanel';
+  panel.innerHTML =
+    '<div id="sideHead">' +
+      '<span class="title">HAROLD SELF-TALK</span>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn" id="sideClose" type="button">×</button>' +
+    '</div>' +
+    '<div id="sideLog"></div>';
+  document.body.appendChild(panel);
+  const overlay = document.createElement('div');
+  overlay.id = 'sideOverlay';
+  document.body.appendChild(overlay);
+  const sideLog = panel.querySelector('#sideLog');
+  let sideOpen = false;
+  let sideBusy = false;
+  const sideHistory = [];
+  const SIDE_MAX = 12;
+
+  function sideAdd(text, cls) {
+    const div = document.createElement('div');
+    div.className = 'line ' + (cls || '');
+    div.textContent = text;
+    sideLog.appendChild(div);
+    sideLog.scrollTop = sideLog.scrollHeight;
+  }
+
+  function openSide() {
+    sideOpen = true;
+    panel.classList.add('open');
+    overlay.classList.add('show');
+    sideBtn.textContent = 'SELF TALK ▾';
+    sideBtn.style.borderColor = '#ffd27a';
+    sideBtn.style.color = '#ffd27a';
+    if (sideHistory.length === 0) {
+      sideAdd('Harold is talking to himself. Click "Self-send" to start.', 'sys');
+    }
+  }
+  function closeSide() {
+    sideOpen = false;
+    panel.classList.remove('open');
+    overlay.classList.remove('show');
+    sideBtn.textContent = 'SELF TALK ▸';
+    sideBtn.style.borderColor = '';
+    sideBtn.style.color = '';
+  }
+  sideBtn.addEventListener('click', function () { sideOpen ? closeSide() : openSide(); });
+  panel.querySelector('#sideClose').addEventListener('click', closeSide);
+  overlay.addEventListener('click', closeSide);
+
+  const sideControls = document.createElement('div');
+  sideControls.style.cssText = 'padding:8px 12px;border-top:1px solid var(--border);display:flex;gap:8px;';
+  sideControls.innerHTML =
+    '<input id="sideInput" type="text" placeholder="Type a self-talk prompt..." spellcheck="false" style="flex:1;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font:inherit;font-size:13px;">' +
+    '<button class="btn" id="sideSend" type="button">Self-send</button>';
+  panel.querySelector('#sideHead').appendChild(sideControls);
+  const sideInput = sideControls.querySelector('#sideInput');
+  const sideSend = sideControls.querySelector('#sideSend');
+
+  async function sideSendMsg() {
+    const text = sideInput.value.trim();
+    if (!text || sideBusy) return;
+    sideInput.value = '';
+    sideAdd(text, 'user');
+    sideHistory.push({ role: 'user', content: text });
+    sideBusy = true;
+    sideSend.disabled = true;
+    try {
+      const res = await fetch(API_BASE + '/chat/completions?self=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + API_KEY },
+        body: JSON.stringify({ model: 'harold-chat', messages: sideHistory.slice(-SIDE_MAX), temperature: 0.7 })
+      });
+      let data = null;
+      try { data = await res.json(); } catch (e) {}
+      if (!res.ok) throw new Error((data && data.error && (data.error.message || data.error)) || ('HTTP ' + res.status));
+      const reply = data && data.choices && data.choices[0] && data.choices[0].message
+        ? (data.choices[0].message.content || '') : '';
+      const out = reply && String(reply).trim() ? String(reply).trim() : '(empty response)';
+      sideHistory.push({ role: 'assistant', content: out });
+      sideAdd(out, 'self');
+    } catch (err) {
+      sideAdd(String(err.message || err), 'err');
+    } finally {
+      sideBusy = false;
+      sideSend.disabled = false;
+      sideInput.focus();
+    }
+  }
+  sideSend.addEventListener('click', sideSendMsg);
+  sideInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); sideSendMsg(); }
+  });
 })();
 </script>
 </body>
