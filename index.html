@@ -122,6 +122,24 @@
   const clearBtn = document.getElementById('clearBtn');
   const history = [];
   let busy = false;
+  const MAIN_KEY = 'harold_main_history';
+
+  function persistMain() {
+    try { localStorage.setItem(MAIN_KEY, JSON.stringify(history)); } catch (e) {}
+  }
+
+  function restoreMain() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(MAIN_KEY) || 'null'); } catch (e) { saved = null; }
+    if (Array.isArray(saved) && saved.length) {
+      saved.forEach(function (m) {
+        if (!m || !m.role || typeof m.content !== 'string') return;
+        history.push(m);
+        addLine(m.content, m.role === 'user' ? 'user' : (m.role === 'assistant' ? 'bot' : 'sys'));
+      });
+      addLine('— previous session restored —', 'sys');
+    }
+  }
 
   function setStatus(text, cls) {
     statusEl.textContent = text;
@@ -194,6 +212,7 @@
     autoResize();
     addLine(text, 'user');
     history.push({ role: 'user', content: text });
+    persistMain();
     busy = true;
     sendBtn.disabled = true;
     setStatus(selfMode ? 'self thinking...' : 'thinking...', '');
@@ -262,9 +281,12 @@
   clearBtn.addEventListener('click', function () {
     log.innerHTML = '';
     history.length = 0;
+    try { localStorage.removeItem(MAIN_KEY); } catch (e) {}
     addLine('Session cleared.', 'sys');
     input.focus();
   });
+
+  restoreMain();
 
   // ---- API settings window ----
   const apiBtn = document.getElementById('apiBtn');
@@ -381,6 +403,23 @@
   let sideBusy = false;
   const sideHistory = [];
   const SIDE_MAX = 12;
+  const SIDE_KEY = 'harold_side_history';
+
+  function persistSide() {
+    try { localStorage.setItem(SIDE_KEY, JSON.stringify(sideHistory)); } catch (e) {}
+  }
+
+  function restoreSide() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(SIDE_KEY) || 'null'); } catch (e) { saved = null; }
+    if (Array.isArray(saved) && saved.length) {
+      saved.forEach(function (m) {
+        if (!m || !m.role || typeof m.content !== 'string') return;
+        sideHistory.push(m);
+        sideAdd(m.content, m.role === 'user' ? 'user' : (m.role === 'assistant' ? 'self' : 'sys'));
+      });
+    }
+  }
 
   function sideAdd(text, cls) {
     const div = document.createElement('div');
@@ -428,6 +467,7 @@
     sideInput.value = '';
     sideAdd(text, 'user');
     sideHistory.push({ role: 'user', content: text });
+    persistSide();
     sideBusy = true;
     sideSend.disabled = true;
     try {
@@ -443,6 +483,7 @@
         ? (data.choices[0].message.content || '') : '';
       const out = reply && String(reply).trim() ? String(reply).trim() : '(empty response)';
       sideHistory.push({ role: 'assistant', content: out });
+      persistSide();
       sideAdd(out, 'self');
     } catch (err) {
       sideAdd(String(err.message || err), 'err');
@@ -456,6 +497,22 @@
   sideInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); sideSendMsg(); }
   });
+
+  // side panel clear button
+  const sideClear = document.createElement('button');
+  sideClear.className = 'btn';
+  sideClear.type = 'button';
+  sideClear.textContent = 'clear';
+  sideClear.addEventListener('click', function () {
+    sideLog.innerHTML = '';
+    sideHistory.length = 0;
+    try { localStorage.removeItem(SIDE_KEY); } catch (e) {}
+    sideAdd('Self-talk cleared.', 'sys');
+    sideInput.focus();
+  });
+  panel.querySelector('#sideHead').appendChild(sideClear);
+
+  restoreSide();
 })();
 </script>
 </body>
