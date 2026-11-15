@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function setup(fetch) {
+function setup(fetch, timer = setTimeout, key = 'example-key') {
   const elements = new Map();
   function element(id = '') {
     let value = '';
@@ -26,6 +26,7 @@ function setup(fetch) {
     createTextNode(text) { return { textContent: text }; },
   };
   const storage = new Map();
+  if (key) storage.set('harold_api_key', key);
   const localStorage = {
     getItem(key) { return storage.get(key) || null; },
     setItem(key, value) { storage.set(key, value); },
@@ -34,10 +35,45 @@ function setup(fetch) {
   const html = fs.readFileSync('index.html', 'utf8');
   const script = html.match(/<script>([\s\S]*?)<\/script>/)[1].split('// ---- Side self-talk window ----')[0];
   vm.runInNewContext(script, {
-    document, localStorage, fetch, URL, FormData, AbortSignal, setTimeout, console,
+    document, localStorage, fetch, URL, FormData, AbortSignal, setTimeout: timer, console,
+    window: { addEventListener() {} },
   });
   return { elements, storage };
 }
+
+test('requires a user-supplied key and uses it immediately after saving', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push(options);
+    return response({ choices: [{ message: { content: 'hello' } }] });
+  }, setTimeout, '');
+  const input = app.elements.get('input');
+  input.value = 'hello';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls.length, 0);
+  assert.equal(input.value, 'hello');
+  app.elements.get('quickKey').value = 'user-entered-key';
+  app.elements.get('saveQuickKey').listeners.click();
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[0].headers.Authorization, 'Bearer user-entered-key');
+  assert.equal(app.storage.get('harold_api_key'), 'user-entered-key');
+});
+
+test('API settings update the next chat request without reloading', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ choices: [{ message: { content: 'hello' } }] });
+  });
+  app.elements.get('apiBase').value = 'https://example.test/v1';
+  app.elements.get('apiKey').value = 'updated-key';
+  app.elements.get('apiSave').listeners.click();
+  app.elements.get('input').value = 'hello';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[0].url, 'https://example.test/v1/chat/completions');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer updated-key');
+  assert.equal(app.elements.get('quickKey').value, 'updated-key');
+});
 
 function response(data, ok = true) {
   return { ok, status: ok ? 200 : 503, json: async () => data };
@@ -71,17 +107,124 @@ test('image question uploads then sends image ID and previous history', async ()
   assert.equal(history.at(-1).content, 'The rectangle is red.');
 });
 
-test('upload failure retains attachment and prompt for retry', async () => {
-  const app = setup(async () => response({ error: 'server unavailable' }, false));
+test('upload failure pauses the queue with its attachment available for retry', async () => {
+  let attempts = 0;
+  const app = setup(async url => {
+    if (url.endsWith('/api/chat/images')) {
+      attempts++;
+      return attempts === 1 ? response({ error: 'server unavailable' }, false) :
+        response({ ok: true, image_id: 'a'.repeat(32) });
+    }
+    return response({ response: 'A picture' });
+  });
   const file = new Blob(['image'], { type: 'image/png' });
   Object.defineProperty(file, 'name', { value: 'sample.png' });
   app.elements.get('chatPhoto').files = [file];
   app.elements.get('input').value = 'Describe it';
   await app.elements.get('send').listeners.click();
-  assert.equal(app.elements.get('input').value, 'Describe it');
-  assert.equal(app.elements.get('chatPhoto').files[0], file);
+  assert.equal(app.elements.get('retryQueue').hidden, false);
   assert.equal(app.storage.has('harold_main_history'), false);
   assert.equal(app.elements.get('status').textContent, 'error');
+  await app.elements.get('retryQueue').listeners.click();
+  assert.equal(attempts, 2);
+  assert.equal(JSON.parse(app.storage.get('harold_main_history'))[0].content, 'Describe it');
+});
+
+test('queues later messages and sends them in order with the previous answer', async () => {
+  const calls = [];
+  let completeFirst;
+  const first = new Promise(resolve => { completeFirst = resolve; });
+  const app = setup(async (url, options) => {
+    calls.push(JSON.parse(options.body));
+    if (calls.length === 1) return first;
+    return response({ choices: [{ message: { content: 'second answer' } }] });
+  });
+  const input = app.elements.get('input');
+  input.value = 'first';
+  const pending = app.elements.get('send').listeners.click();
+  input.value = 'second';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls.length, 1);
+  assert.equal(input.disabled, undefined);
+  completeFirst(response({ choices: [{ message: { content: 'first answer' } }] }));
+  await pending;
+  assert.deepEqual(calls[1].messages.map(message => message.content), ['first', 'first answer', 'second']);
+  assert.equal(JSON.parse(app.storage.get('harold_main_history')).length, 4);
+});
+
+test('retries a server busy response and keeps message order', async () => {
+  const waits = [];
+  let attempts = 0;
+  const app = setup(async () => {
+    attempts++;
+    return attempts === 1 ? response({ error: { message: 'Harold is busy; try again shortly.' } }, false) :
+      response({ choices: [{ message: { content: 'ready' } }] });
+  }, (resolve, delay) => { waits.push(delay); resolve(); });
+  app.elements.get('input').value = 'please wait';
+  await app.elements.get('send').listeners.click();
+  assert.equal(attempts, 2);
+  assert.deepEqual(waits, [10000]);
+  assert.equal(JSON.parse(app.storage.get('harold_main_history'))[1].content, 'ready');
+});
+
+test('retries an image request without uploading the image twice', async () => {
+  let uploads = 0;
+  let chats = 0;
+  const app = setup(async url => {
+    if (url.endsWith('/api/chat/images')) {
+      uploads++;
+      return response({ ok: true, image_id: 'a'.repeat(32) });
+    }
+    chats++;
+    return chats === 1 ? response({ error: 'Harold is still processing another message; try again shortly.' }, false) :
+      response({ response: 'Image described' });
+  }, resolve => resolve());
+  const file = new Blob(['image'], { type: 'image/png' });
+  Object.defineProperty(file, 'name', { value: 'sample.png' });
+  app.elements.get('chatPhoto').files = [file];
+  await app.elements.get('send').listeners.click();
+  assert.equal(uploads, 1);
+  assert.equal(chats, 2);
+  assert.equal(JSON.parse(app.storage.get('harold_main_history'))[1].content, 'Image described');
+});
+
+test('rate limiting waits before retrying instead of dropping a message', async () => {
+  const waits = [];
+  let attempts = 0;
+  const app = setup(async () => {
+    attempts++;
+    return attempts === 1
+      ? { ...response({ error: { message: 'rate limit exceeded' } }, false), status: 429 }
+      : response({ choices: [{ message: { content: 'ready' } }] });
+  }, (resolve, delay) => { waits.push(delay); resolve(); });
+  app.elements.get('input').value = 'hello';
+  await app.elements.get('send').listeners.click();
+  assert.deepEqual(waits, [65000]);
+  assert.equal(attempts, 2);
+});
+
+test('a failed message pauses later messages until explicitly discarded', async () => {
+  let rejectFirst;
+  const first = new Promise((resolve, reject) => { rejectFirst = reject; });
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push(JSON.parse(options.body));
+    if (calls.length === 1) return first;
+    return response({ choices: [{ message: { content: 'done' } }] });
+  });
+  const input = app.elements.get('input');
+  input.value = 'first';
+  const pending = app.elements.get('send').listeners.click();
+  input.value = 'second';
+  await app.elements.get('send').listeners.click();
+  rejectFirst(new Error('network error'));
+  await pending;
+  assert.equal(calls.length, 1);
+  assert.equal(app.elements.get('discardQueue').hidden, false);
+  assert.equal(app.elements.get('clearBtn').disabled, true);
+  await app.elements.get('discardQueue').listeners.click();
+  assert.equal(calls[1].messages.at(-1).content, 'second');
+  assert.equal(app.elements.get('clearBtn').disabled, false);
 });
 
 test('rejects invalid images before upload', () => {

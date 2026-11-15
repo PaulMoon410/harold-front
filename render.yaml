@@ -9,8 +9,6 @@ services:
     envVars:
       - key: API_BASE
         value: https://lubuntu.tail239f3d.ts.net/v1
-      - key: API_KEY
-        value: [REDACTED]
     routes:
       - type: rewrite
         source: /*

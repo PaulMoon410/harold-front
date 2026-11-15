@@ -25,6 +25,7 @@
   .spacer { flex: 1; }
   .btn { background: transparent; color: var(--dim); border: 1px solid var(--border); padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 4px; }
   .btn:hover { color: var(--fg); border-color: var(--dim); }
+  #quickKey { width: 170px; max-width: 45vw; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px; }
   #log { flex: 1; overflow-y: auto; padding: 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .line { margin: 0 0 8px 0; }
   .user { color: #e8ffe9; }
@@ -71,6 +72,9 @@
 <div class="wrap">
   <div class="bar">
     <span class="title">HAROLD TERMINAL</span>
+    <label for="quickKey" class="status">API key</label>
+    <input id="quickKey" type="password" autocomplete="off" placeholder="Enter API key">
+    <button class="btn" id="saveQuickKey" type="button">Save key</button>
     <span id="status" class="status">ready</span>
     <span class="spacer"></span>
     <button class="btn" id="selfBtn" type="button">SELF: OFF</button>
@@ -87,6 +91,11 @@
     <input type="file" id="photo" accept="image/jpeg,image/png,image/webp" hidden>
     <button class="btn" id="photoBtn" type="button" title="Upload photo to enhance">Enhance</button>
     <button id="send" type="button">Send</button>
+  </div>
+  <p id="queueStatus" role="status" style="margin:6px 14px;color:var(--dim);font-size:12px;">Queued messages stay in this tab until sent.</p>
+  <div style="display:flex;gap:8px;margin:0 14px;">
+    <button class="btn" id="retryQueue" type="button" hidden>Retry message</button>
+    <button class="btn" id="discardQueue" type="button" hidden>Discard failed message</button>
   </div>
   <p id="attachmentNote" role="status" style="margin:6px 14px;color:var(--dim);font-size:12px;">Attach a JPEG, PNG or WebP (up to 10 MB / 20 megapixels) and ask about it. Attachments expire after 7 days and are removed during server cleanup. They may be sent to external vision providers.</p>
   <button class="btn" id="removePhoto" type="button" hidden>Remove attached image</button>
@@ -113,9 +122,8 @@
 <script>
 (function () {
   const DEFAULT_BASE = 'https://lubuntu.tail239f3d.ts.net/v1';
-  const DEFAULT_KEY = '[REDACTED]';
-  const API_BASE = localStorage.getItem('harold_api_base') || DEFAULT_BASE;
-  const API_KEY = localStorage.getItem('harold_api_key') || DEFAULT_KEY;
+  let apiBaseValue = localStorage.getItem('harold_api_base') || DEFAULT_BASE;
+  let apiKeyValue = localStorage.getItem('harold_api_key') || '';
   const MODEL = 'harold';
 
   const log = document.getElementById('log');
@@ -123,13 +131,21 @@
   const sendBtn = document.getElementById('send');
   const statusEl = document.getElementById('status');
   const clearBtn = document.getElementById('clearBtn');
+  const quickKey = document.getElementById('quickKey');
+  const saveQuickKey = document.getElementById('saveQuickKey');
   const chatPhoto = document.getElementById('chatPhoto');
   const attachPhoto = document.getElementById('attachPhoto');
   const removePhoto = document.getElementById('removePhoto');
   const attachmentNote = document.getElementById('attachmentNote');
+  const queueStatus = document.getElementById('queueStatus');
+  const retryQueue = document.getElementById('retryQueue');
+  const discardQueue = document.getElementById('discardQueue');
   const BACKEND = 'https://lubuntu.tail239f3d.ts.net';
   const history = [];
-  let busy = false;
+  const queue = [];
+  let processingQueue = false;
+  let queuePaused = false;
+  let photoBusy = false;
   const MAIN_KEY = 'harold_main_history';
 
   function persistMain() {
@@ -200,96 +216,142 @@
     input.style.height = Math.min(input.scrollHeight, 160) + 'px';
   }
 
-  async function send() {
+  function updateQueueStatus(message) {
+    queueStatus.textContent = message || (queuePaused
+      ? 'Queue paused with ' + queue.length + ' message(s). Retry or discard the first message.'
+      : queue.length ? queue.length + ' message(s) waiting or being processed. Keep this tab open.'
+      : 'Queued messages stay in this tab until sent.');
+    retryQueue.hidden = !queuePaused;
+    discardQueue.hidden = !queuePaused;
+    clearBtn.disabled = queue.length > 0;
+  }
+
+  function send() {
     const file = chatPhoto.files && chatPhoto.files[0];
     const text = input.value.trim() || (file ? 'Describe the attached image.' : '');
-    if (!text || busy) return;
+    if (!text) return;
     if (file && selfMode) {
       addLine('Turn SELF mode off to ask Harold about an image.', 'err');
       return;
     }
+    if (!file && !apiKeyValue) {
+      addLine('Enter and save an API key in the top bar before sending.', 'err');
+      quickKey.focus();
+      return;
+    }
+    if (queue.length >= 20) {
+      addLine('The queue is full. Wait for a message to finish before sending another.', 'err');
+      return;
+    }
+    queue.push({ text, file, selfMode, imageId: null });
     input.value = '';
+    if (file) {
+      chatPhoto.value = '';
+      removePhoto.hidden = true;
+      attachmentNote.textContent = 'Image queued. Attach another image to send with a different message.';
+    }
     autoResize();
     addLine(text + (file ? ' [image attached]' : ''), 'user');
-    busy = true;
-    sendBtn.disabled = true;
-    input.disabled = true;
-    selfBtn.disabled = true;
-    attachPhoto.disabled = true;
-    removePhoto.disabled = true;
-    clearBtn.disabled = true;
-    photoBtn.disabled = true;
-    setStatus(selfMode ? 'self thinking...' : 'thinking...', '');
-
-    try {
-      let imageId;
-      if (file) {
-        setStatus('uploading image...', '');
-        const formData = new FormData();
-        formData.append('file', file);
-        const upload = await fetch(BACKEND + '/api/chat/images', { method: 'POST', body: formData });
-        const result = await upload.json();
-        if (!upload.ok) throw new Error(result.error || ('HTTP ' + upload.status));
-        if (result.ok !== true || typeof result.image_id !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(result.image_id)) {
-          throw new Error('Unexpected image upload response');
-        }
-        imageId = result.image_id;
-        setStatus('analyzing image...', '');
-      }
-      const endpoint = imageId ? BACKEND + '/api/chat' : (selfMode ? API_BASE + '/chat/completions?self=1' : API_BASE + '/chat/completions');
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: imageId ? { 'Content-Type': 'application/json' } : {
-          'Content-Type': 'application/json', 'Authorization': 'Bearer ' + API_KEY
-        },
-        body: JSON.stringify(imageId ? {
-          prompt: text,
-          history: history.slice(-20),
-          image_id: imageId
-        } : {
-          model: selfMode ? 'harold-chat' : MODEL,
-          messages: history.concat({ role: 'user', content: text }).slice(-20),
-          temperature: 0.7
-        })
-      });
-
-      let data;
-      try { data = await res.json(); } catch (e) { data = null; }
-      if (!res.ok) {
-        const msg = (data && data.error && (data.error.message || data.error)) || ('HTTP ' + res.status);
-        throw new Error(msg);
-      }
-
-      const reply = imageId ? data && data.response : data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-      if (typeof reply !== 'string' || !reply.trim()) throw new Error('Unexpected empty server response');
-      const out = reply.trim();
-      history.push({ role: 'user', content: text });
-      history.push({ role: 'assistant', content: out });
-      persistMain();
-      addLine(out, selfMode ? 'self' : 'bot');
-      if (file) {
-        chatPhoto.value = '';
-        removePhoto.hidden = true;
-        attachmentNote.textContent = 'Image analyzed. Attach another image to ask a new image question.';
-      }
-      setStatus('connected', 'ok');
-    } catch (err) {
-      addLine(String(err.message || err), 'err');
-      input.value = text;
-      autoResize();
-      setStatus('error', 'bad');
-    } finally {
-      busy = false;
-      sendBtn.disabled = false;
-      input.disabled = false;
-      selfBtn.disabled = false;
-      attachPhoto.disabled = false;
-      removePhoto.disabled = false;
-      clearBtn.disabled = false;
-      photoBtn.disabled = false;
-      input.focus();
-    }
+    updateQueueStatus();
+    return processQueue();
   }
+
+  async function processQueue() {
+    if (processingQueue || queuePaused) return;
+    processingQueue = true;
+    while (queue.length && !queuePaused) {
+      const item = queue[0];
+      try {
+        if (item.file && !item.imageId) {
+          setStatus('uploading image...', '');
+          const formData = new FormData();
+          formData.append('file', item.file);
+          const upload = await fetch(BACKEND + '/api/chat/images', { method: 'POST', body: formData });
+          const result = await upload.json();
+          if (upload.status === 429 && typeof result.error === 'string' && /rate limit/i.test(result.error)) {
+            updateQueueStatus('Image upload rate limited; retrying in 65 seconds. ' + queue.length + ' message(s) queued.');
+            await new Promise(resolve => setTimeout(resolve, 65000));
+            continue;
+          }
+          if (!upload.ok) throw new Error(result.error || ('HTTP ' + upload.status));
+          if (result.ok !== true || typeof result.image_id !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(result.image_id)) {
+            throw new Error('Unexpected image upload response');
+          }
+          item.imageId = result.image_id;
+        }
+        setStatus(item.imageId ? 'analyzing image...' : (item.selfMode ? 'self thinking...' : 'thinking...'), '');
+        const endpoint = item.imageId ? BACKEND + '/api/chat' : (item.selfMode ? apiBaseValue + '/chat/completions?self=1' : apiBaseValue + '/chat/completions');
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: item.imageId ? { 'Content-Type': 'application/json' } : {
+            'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKeyValue
+          },
+          body: JSON.stringify(item.imageId ? {
+            prompt: item.text,
+            history: history.slice(-20),
+            image_id: item.imageId
+          } : {
+            model: item.selfMode ? 'harold-chat' : MODEL,
+            messages: history.concat({ role: 'user', content: item.text }).slice(-20),
+            temperature: 0.7
+          })
+        });
+
+        let data;
+        try { data = await res.json(); } catch (e) { data = null; }
+        if (!res.ok) {
+          const msg = (data && data.error && (data.error.message || data.error)) || ('HTTP ' + res.status);
+          if ((res.status === 503 && /busy|still processing another message/i.test(msg)) ||
+              (res.status === 429 && /rate limit/i.test(msg))) {
+            const delay = res.status === 429 ? 65000 : 10000;
+            updateQueueStatus((res.status === 429 ? 'Rate limited' : 'Harold is busy') +
+              '; retrying in ' + delay / 1000 + ' seconds. ' + queue.length + ' message(s) queued.');
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          if (res.status === 410 && item.imageId) item.imageId = null;
+          throw new Error(msg);
+        }
+
+        const reply = item.imageId ? data && data.response : data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (typeof reply !== 'string' || !reply.trim()) throw new Error('Unexpected empty server response');
+        const out = reply.trim();
+        history.push({ role: 'user', content: item.text });
+        history.push({ role: 'assistant', content: out });
+        persistMain();
+        addLine(out, item.selfMode ? 'self' : 'bot');
+        queue.shift();
+        updateQueueStatus();
+        setStatus('connected', 'ok');
+      } catch (err) {
+        queuePaused = true;
+        addLine('Queue paused: ' + String(err.message || err) + '. The server may have processed this message; retry or discard it.', 'err');
+        updateQueueStatus('Queue paused with ' + queue.length + ' message(s). Retry or discard the first message.');
+        setStatus('error', 'bad');
+      }
+    }
+    processingQueue = false;
+  }
+
+  retryQueue.addEventListener('click', function () {
+    queuePaused = false;
+    updateQueueStatus();
+    return processQueue();
+  });
+  discardQueue.addEventListener('click', function () {
+    if (!queuePaused) return;
+    queue.shift();
+    queuePaused = false;
+    addLine('Failed message discarded.', 'sys');
+    updateQueueStatus();
+    return processQueue();
+  });
+  window.addEventListener('beforeunload', function (event) {
+    if (queue.length) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
 
   // ---- SELF mode: Harold chats with himself ----
   const selfBtn = document.getElementById('selfBtn');
@@ -333,9 +395,27 @@
   const apiSave = document.getElementById('apiSave');
   const apiReset = document.getElementById('apiReset');
 
+  quickKey.value = apiKeyValue;
+  saveQuickKey.addEventListener('click', function () {
+    const key = quickKey.value.trim();
+    if (!key) {
+      addLine('Enter an API key before saving.', 'err');
+      quickKey.focus();
+      return;
+    }
+    try {
+      localStorage.setItem('harold_api_key', key);
+    } catch (error) {
+      addLine('Could not save the API key in this browser: ' + error.message, 'err');
+      return;
+    }
+    apiKeyValue = key;
+    addLine('API key saved in this browser.', 'sys');
+  });
+
   function openApi() {
-    apiBase.value = API_BASE;
-    apiKey.value = API_KEY;
+    apiBase.value = apiBaseValue;
+    apiKey.value = apiKeyValue;
     apiOverlay.style.display = 'block';
     apiModal.style.display = 'block';
     setTimeout(function () { apiBase.focus(); }, 50);
@@ -351,14 +431,23 @@
     const base = apiBase.value.trim().replace(/\/$/, '');
     const key = apiKey.value.trim();
     if (!base) { addLine('API Base URL is required.', 'err'); apiBase.focus(); return; }
-    localStorage.setItem('harold_api_base', base);
-    localStorage.setItem('harold_api_key', key);
-    addLine('API settings saved for this session. New values take effect on the next request.', 'sys');
+    if (!key) { addLine('API key is required.', 'err'); apiKey.focus(); return; }
+    try {
+      localStorage.setItem('harold_api_base', base);
+      localStorage.setItem('harold_api_key', key);
+    } catch (error) {
+      addLine('Could not save API settings in this browser: ' + error.message, 'err');
+      return;
+    }
+    apiBaseValue = base;
+    apiKeyValue = key;
+    quickKey.value = key;
+    addLine('API settings saved in this browser.', 'sys');
     closeApi();
   });
   apiReset.addEventListener('click', function () {
     apiBase.value = DEFAULT_BASE;
-    apiKey.value = DEFAULT_KEY;
+    apiKey.value = '';
   });
 
   // ---- photo upload / enhance ----
@@ -394,19 +483,15 @@
 
   photoInput.addEventListener('change', async function () {
     const file = photoInput.files && photoInput.files[0];
-    if (!file || busy) return;
+    if (!file || photoBusy) return;
     if (file.size > 10 * 1024 * 1024) {
       note('Photo must be 10 MB or smaller.');
       photoInput.value = '';
       return;
     }
     addLine('Enhance uploaded photo: ' + file.name, 'user');
-    busy = true;
+    photoBusy = true;
     photoBtn.disabled = true;
-    sendBtn.disabled = true;
-    attachPhoto.disabled = true;
-    removePhoto.disabled = true;
-    setStatus('enhancing photo...', '');
     note('Improves contrast, color, and sharpness; not AI retouching. Results are accessible by link; do not upload private photos.');
     const body = new FormData();
     body.append('file', file);
@@ -422,17 +507,12 @@
       }
       const url = BACKEND + data.url;
       addLine((data.message || 'Enhanced photo ready.') + '\n![Enhanced photo](' + url + ')\n[Download](' + url + ')', 'bot');
-      setStatus('connected', 'ok');
       note('');
     } catch (err) {
       addLine('Could not enhance photo: ' + (err.message || err), 'err');
-      setStatus('error', 'bad');
     } finally {
-      busy = false;
+      photoBusy = false;
       photoBtn.disabled = false;
-      sendBtn.disabled = false;
-      attachPhoto.disabled = false;
-      removePhoto.disabled = false;
       photoInput.value = '';
       input.focus();
     }
@@ -525,6 +605,12 @@
   async function sideSendMsg() {
     const text = sideInput.value.trim();
     if (!text || sideBusy) return;
+    const apiBase = localStorage.getItem('harold_api_base') || 'https://lubuntu.tail239f3d.ts.net/v1';
+    const apiKey = localStorage.getItem('harold_api_key') || '';
+    if (!apiKey) {
+      sideAdd('Enter and save an API key in the top bar before sending.', 'err');
+      return;
+    }
     sideInput.value = '';
     sideAdd(text, 'user');
     sideHistory.push({ role: 'user', content: text });
@@ -532,9 +618,9 @@
     sideBusy = true;
     sideSend.disabled = true;
     try {
-      const res = await fetch(API_BASE + '/chat/completions?self=1', {
+      const res = await fetch(apiBase + '/chat/completions?self=1', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + API_KEY },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
         body: JSON.stringify({ model: 'harold-chat', messages: sideHistory.slice(-SIDE_MAX), temperature: 0.7 })
       });
       let data = null;
