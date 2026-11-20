@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function setup(fetch, timer = setTimeout, key = 'example-key', base = 'https://example.test/v1', keyBase = base) {
+function setup(fetch, timer = setTimeout, base = 'https://example.test/v1') {
   const elements = new Map();
   function element(id = '') {
     let value = '';
@@ -31,10 +31,8 @@ function setup(fetch, timer = setTimeout, key = 'example-key', base = 'https://e
   };
   const storage = new Map();
   if (base) storage.set('harold_api_base', base);
-  if (key) {
-    storage.set('harold_api_key', key);
-    if (keyBase) storage.set('harold_api_key_base', keyBase);
-  }
+  storage.set('harold_api_key', 'obsolete-key');
+  storage.set('harold_api_key_base', base);
   const localStorage = {
     getItem(key) { return storage.get(key) || null; },
     setItem(key, value) { storage.set(key, value); },
@@ -49,54 +47,52 @@ function setup(fetch, timer = setTimeout, key = 'example-key', base = 'https://e
   return { elements, storage };
 }
 
-test('requires a user-supplied key and uses it immediately after saving', async () => {
+test('sends chat without asking for or including an API key', async () => {
   const calls = [];
   const app = setup(async (url, options) => {
-    calls.push(options);
+    calls.push({ url, options });
     return response({ choices: [{ message: { content: 'hello' } }] });
-  }, setTimeout, '');
+  });
   const input = app.elements.get('input');
   input.value = 'hello';
   await app.elements.get('send').listeners.click();
-  assert.equal(calls.length, 0);
-  assert.equal(input.value, 'hello');
-  app.elements.get('quickKey').value = 'user-entered-key';
-  app.elements.get('saveQuickKey').listeners.click();
-  await app.elements.get('send').listeners.click();
-  assert.equal(calls[0].headers.Authorization, 'Bearer user-entered-key');
-  assert.equal(app.storage.get('harold_api_key'), 'user-entered-key');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://example.test/v1/chat/completions');
+  assert.equal(JSON.parse(calls[0].options.body).model, 'harold-chat');
+  assert.equal(calls[0].options.headers['Content-Type'], 'application/json');
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+  assert.equal(Object.keys(calls[0].options.headers).length, 1);
+  assert.equal(app.storage.has('harold_api_key'), false);
+  assert.equal(app.storage.has('harold_api_key_base'), false);
 });
 
-test('API settings update the next chat request without reloading', async () => {
+test('API URL settings update the next chat request without reloading', async () => {
   const calls = [];
   const app = setup(async (url, options) => {
     calls.push({ url, options });
     return response({ choices: [{ message: { content: 'hello' } }] });
   });
   app.elements.get('apiBase').value = 'https://pixel.example.test/';
-  app.elements.get('apiKey').value = 'updated-key';
   app.elements.get('apiSave').listeners.click();
   app.elements.get('input').value = 'hello';
   await app.elements.get('send').listeners.click();
   assert.equal(calls[0].url, 'https://pixel.example.test/v1/chat/completions');
-  assert.equal(calls[0].options.headers.Authorization, 'Bearer updated-key');
-  assert.equal(app.elements.get('quickKey').value, 'updated-key');
+  assert.equal(calls[0].options.headers.Authorization, undefined);
   app.elements.get('sideInput').value = 'Think about it';
   await app.elements.get('sideSend').listeners.click();
   assert.equal(calls[1].url, 'https://pixel.example.test/v1/chat/completions?self=1');
-  assert.equal(calls[1].options.headers.Authorization, 'Bearer updated-key');
+  assert.equal(calls[1].options.headers.Authorization, undefined);
 });
 
-test('rejects insecure endpoints and does not send an unbound legacy key', async () => {
+test('rejects insecure endpoints without sending a request', async () => {
   let requests = 0;
-  const app = setup(() => { requests++; }, setTimeout, 'old-key', 'https://example.test/v1', '');
+  const app = setup(() => { requests++; }, setTimeout, '');
   app.elements.get('apiBase').value = 'http://pixel.example.test/v1';
   app.elements.get('apiSave').listeners.click();
   assert.match(app.elements.get('apiError').textContent, /HTTPS/);
   app.elements.get('input').value = 'hello';
   await app.elements.get('send').listeners.click();
   assert.equal(requests, 0);
-  assert.equal(app.elements.get('quickKey').value, '');
 });
 
 function response(data, ok = true) {
