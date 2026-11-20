@@ -1,14 +1,17 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
 
-function setup(fetch, timer = setTimeout, key = 'example-key') {
+function setup(fetch, timer = setTimeout, key = 'example-key', base = 'https://example.test/v1', keyBase = base) {
   const elements = new Map();
   function element(id = '') {
     let value = '';
     return {
       id, files: [], style: {}, children: [], listeners: {}, hidden: false,
+      classList: { add() {}, remove() {} },
+      querySelector(selector) { return document.getElementById(selector.slice(1)); },
       get value() { return value; },
       set value(next) { value = next; if (!next && id === 'chatPhoto') this.files = []; },
       addEventListener(type, handler) { this.listeners[type] = handler; },
@@ -18,6 +21,7 @@ function setup(fetch, timer = setTimeout, key = 'example-key') {
   }
   const document = {
     baseURI: 'https://example.test/',
+    body: element('body'),
     getElementById(id) {
       if (!elements.has(id)) elements.set(id, element(id));
       return elements.get(id);
@@ -26,14 +30,18 @@ function setup(fetch, timer = setTimeout, key = 'example-key') {
     createTextNode(text) { return { textContent: text }; },
   };
   const storage = new Map();
-  if (key) storage.set('harold_api_key', key);
+  if (base) storage.set('harold_api_base', base);
+  if (key) {
+    storage.set('harold_api_key', key);
+    if (keyBase) storage.set('harold_api_key_base', keyBase);
+  }
   const localStorage = {
     getItem(key) { return storage.get(key) || null; },
     setItem(key, value) { storage.set(key, value); },
     removeItem(key) { storage.delete(key); },
   };
-  const html = fs.readFileSync('index.html', 'utf8');
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1].split('// ---- Side self-talk window ----')[0];
+  const html = fs.readFileSync(path.join(__dirname, '../publish/index.html'), 'utf8');
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   vm.runInNewContext(script, {
     document, localStorage, fetch, URL, FormData, AbortSignal, setTimeout: timer, console,
     window: { addEventListener() {} },
@@ -65,14 +73,30 @@ test('API settings update the next chat request without reloading', async () => 
     calls.push({ url, options });
     return response({ choices: [{ message: { content: 'hello' } }] });
   });
-  app.elements.get('apiBase').value = 'https://example.test/v1';
+  app.elements.get('apiBase').value = 'https://pixel.example.test/';
   app.elements.get('apiKey').value = 'updated-key';
   app.elements.get('apiSave').listeners.click();
   app.elements.get('input').value = 'hello';
   await app.elements.get('send').listeners.click();
-  assert.equal(calls[0].url, 'https://example.test/v1/chat/completions');
+  assert.equal(calls[0].url, 'https://pixel.example.test/v1/chat/completions');
   assert.equal(calls[0].options.headers.Authorization, 'Bearer updated-key');
   assert.equal(app.elements.get('quickKey').value, 'updated-key');
+  app.elements.get('sideInput').value = 'Think about it';
+  await app.elements.get('sideSend').listeners.click();
+  assert.equal(calls[1].url, 'https://pixel.example.test/v1/chat/completions?self=1');
+  assert.equal(calls[1].options.headers.Authorization, 'Bearer updated-key');
+});
+
+test('rejects insecure endpoints and does not send an unbound legacy key', async () => {
+  let requests = 0;
+  const app = setup(() => { requests++; }, setTimeout, 'old-key', 'https://example.test/v1', '');
+  app.elements.get('apiBase').value = 'http://pixel.example.test/v1';
+  app.elements.get('apiSave').listeners.click();
+  assert.match(app.elements.get('apiError').textContent, /HTTPS/);
+  app.elements.get('input').value = 'hello';
+  await app.elements.get('send').listeners.click();
+  assert.equal(requests, 0);
+  assert.equal(app.elements.get('quickKey').value, '');
 });
 
 function response(data, ok = true) {
@@ -96,8 +120,8 @@ test('image question uploads then sends image ID and previous history', async ()
   app.elements.get('chatPhoto').listeners.change();
   input.value = 'What color?';
   await app.elements.get('send').listeners.click();
-  assert.match(calls[1].url, /\/api\/chat\/images$/);
-  assert.match(calls[2].url, /\/api\/chat$/);
+  assert.equal(calls[1].url, 'https://example.test/api/chat/images');
+  assert.equal(calls[2].url, 'https://example.test/api/chat');
   const body = JSON.parse(calls[2].options.body);
   assert.equal(body.prompt, 'What color?');
   assert.equal(body.image_id, 'a'.repeat(32));
@@ -105,6 +129,21 @@ test('image question uploads then sends image ID and previous history', async ()
   assert.equal(app.elements.get('chatPhoto').files.length, 0);
   const history = JSON.parse(app.storage.get('harold_main_history'));
   assert.equal(history.at(-1).content, 'The rectangle is red.');
+});
+
+test('photo enhancement uses the configured backend for uploads and output links', async () => {
+  const requests = [];
+  const imagePath = '/images/enhanced-' + 'a'.repeat(32) + '.jpg';
+  const app = setup(async url => {
+    requests.push(url);
+    return response({ ok: true, url: imagePath });
+  });
+  const picker = app.elements.get('photo');
+  picker.files = [new Blob(['image'], { type: 'image/png' })];
+  await picker.listeners.change();
+  assert.deepEqual(requests, ['https://example.test/api/images/enhance']);
+  const output = app.elements.get('log').children.at(-1);
+  assert.ok(output.children.some(child => child.src === 'https://example.test' + imagePath));
 });
 
 test('upload failure pauses the queue with its attachment available for retry', async () => {

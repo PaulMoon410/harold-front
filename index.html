@@ -25,7 +25,7 @@
   .spacer { flex: 1; }
   .btn { background: transparent; color: var(--dim); border: 1px solid var(--border); padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 4px; }
   .btn:hover { color: var(--fg); border-color: var(--dim); }
-  #quickKey { width: 170px; max-width: 45vw; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px; }
+    #quickKey { width: 170px; max-width: 45vw; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px; }
   #log { flex: 1; overflow-y: auto; padding: 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .line { margin: 0 0 8px 0; }
   .user { color: #e8ffe9; }
@@ -72,14 +72,14 @@
 <div class="wrap">
   <div class="bar">
     <span class="title">HAROLD TERMINAL</span>
-    <label for="quickKey" class="status">API key</label>
-    <input id="quickKey" type="password" autocomplete="off" placeholder="Enter API key">
-    <button class="btn" id="saveQuickKey" type="button">Save key</button>
+      <label for="quickKey" class="status">API key</label>
+      <input id="quickKey" type="password" autocomplete="off" placeholder="Enter API key">
+      <button class="btn" id="saveQuickKey" type="button">Save key</button>
     <span id="status" class="status">ready</span>
     <span class="spacer"></span>
     <button class="btn" id="selfBtn" type="button">SELF: OFF</button>
     <button class="btn" id="sideBtn" type="button">SELF TALK ▸</button>
-    <button class="btn" id="apiBtn" type="button">API ⚙</button>
+      <button class="btn" id="apiBtn" type="button">API ⚙</button>
     <button class="btn" id="clearBtn" type="button">clear</button>
   </div>
   <div id="log" aria-live="polite"></div>
@@ -107,12 +107,13 @@
 <div id="apiModal" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0.95);background:#0d120f;border:1px solid var(--border);border-radius:8px;padding:18px;width:440px;max-width:92vw;z-index:61;display:none;box-shadow:0 12px 40px rgba(0,0,0,0.6);">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
     <span style="color:var(--accent);font-weight:700;">API Settings</span>
-    <button class="btn" id="apiClose" type="button">×</button>
+    <button class="btn" id="apiClose" type="button" aria-label="Close API settings">×</button>
   </div>
-  <label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px;">API Base URL</label>
-  <input id="apiBase" type="text" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;margin-bottom:14px;">
-  <label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px;">API Key</label>
-  <input id="apiKey" type="password" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;margin-bottom:14px;">
+  <label for="apiBase" style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px;">API Base URL</label>
+  <input id="apiBase" type="url" placeholder="https://api.example.com/v1" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;margin-bottom:14px;">
+  <label for="apiKey" style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px;">API Key</label>
+  <input id="apiKey" type="password" autocomplete="off" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;margin-bottom:14px;">
+  <p id="apiError" role="alert" style="color:var(--fg);font-size:12px;"></p>
   <div style="display:flex;gap:8px;justify-content:flex-end;">
     <button class="btn" id="apiReset" type="button">Reset to default</button>
     <button class="btn" id="apiSave" type="button">Save</button>
@@ -121,10 +122,21 @@
 
 <script>
 (function () {
-  const DEFAULT_BASE = 'https://lubuntu.tail239f3d.ts.net/v1';
-  let apiBaseValue = localStorage.getItem('harold_api_base') || DEFAULT_BASE;
-  let apiKeyValue = localStorage.getItem('harold_api_key') || '';
+  const DEFAULT_BASE = /* API_BASE */ '';
+  const legacyBase = 'https://lubuntu.tail239f3d.ts.net/v1';
+  const savedBase = normalizeBase(localStorage.getItem('harold_api_base') || '');
+  let apiBaseValue = savedBase && savedBase !== legacyBase ? savedBase : DEFAULT_BASE;
+  let apiKeyValue = localStorage.getItem('harold_api_key_base') === apiBaseValue
+    ? localStorage.getItem('harold_api_key') || '' : '';
   const MODEL = 'harold';
+
+  function normalizeBase(value) {
+    let url;
+    try { url = new URL(value.trim()); } catch { return ''; }
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash ||
+        !/^\/(?:v1\/?)?$/.test(url.pathname)) return '';
+    return url.origin + '/v1';
+  }
 
   const log = document.getElementById('log');
   const input = document.getElementById('input');
@@ -140,7 +152,6 @@
   const queueStatus = document.getElementById('queueStatus');
   const retryQueue = document.getElementById('retryQueue');
   const discardQueue = document.getElementById('discardQueue');
-  const BACKEND = 'https://lubuntu.tail239f3d.ts.net';
   const history = [];
   const queue = [];
   let processingQueue = false;
@@ -230,6 +241,7 @@
     const file = chatPhoto.files && chatPhoto.files[0];
     const text = input.value.trim() || (file ? 'Describe the attached image.' : '');
     if (!text) return;
+    if (!requireBackend(addLine)) return;
     if (file && selfMode) {
       addLine('Turn SELF mode off to ask Harold about an image.', 'err');
       return;
@@ -262,11 +274,15 @@
     while (queue.length && !queuePaused) {
       const item = queue[0];
       try {
+        const base = apiBaseValue;
+        const backend = new URL(base).origin;
+        const key = apiKeyValue;
+        if (item.imageBackend !== backend) item.imageId = null;
         if (item.file && !item.imageId) {
           setStatus('uploading image...', '');
           const formData = new FormData();
           formData.append('file', item.file);
-          const upload = await fetch(BACKEND + '/api/chat/images', { method: 'POST', body: formData });
+          const upload = await fetch(backend + '/api/chat/images', { method: 'POST', body: formData });
           const result = await upload.json();
           if (upload.status === 429 && typeof result.error === 'string' && /rate limit/i.test(result.error)) {
             updateQueueStatus('Image upload rate limited; retrying in 65 seconds. ' + queue.length + ' message(s) queued.');
@@ -278,13 +294,14 @@
             throw new Error('Unexpected image upload response');
           }
           item.imageId = result.image_id;
+          item.imageBackend = backend;
         }
         setStatus(item.imageId ? 'analyzing image...' : (item.selfMode ? 'self thinking...' : 'thinking...'), '');
-        const endpoint = item.imageId ? BACKEND + '/api/chat' : (item.selfMode ? apiBaseValue + '/chat/completions?self=1' : apiBaseValue + '/chat/completions');
+        const endpoint = item.imageId ? backend + '/api/chat' : base + '/chat/completions' + (item.selfMode ? '?self=1' : '');
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: item.imageId ? { 'Content-Type': 'application/json' } : {
-            'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKeyValue
+            'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key
           },
           body: JSON.stringify(item.imageId ? {
             prompt: item.text,
@@ -385,69 +402,85 @@
 
   restoreMain();
 
-  // ---- API settings window ----
   const apiBtn = document.getElementById('apiBtn');
   const apiOverlay = document.getElementById('apiOverlay');
   const apiModal = document.getElementById('apiModal');
   const apiBase = document.getElementById('apiBase');
   const apiKey = document.getElementById('apiKey');
-  const apiClose = document.getElementById('apiClose');
-  const apiSave = document.getElementById('apiSave');
-  const apiReset = document.getElementById('apiReset');
+  const apiError = document.getElementById('apiError');
+
+  function requireBackend(report) {
+    if (apiBaseValue) return true;
+    report('Set the Harold HTTPS API URL in API Settings first.', 'err');
+    apiBtn.focus();
+    return false;
+  }
+
+  function saveSettings(base, key) {
+    if (base === DEFAULT_BASE) localStorage.removeItem('harold_api_base');
+    else localStorage.setItem('harold_api_base', base);
+    localStorage.setItem('harold_api_key', key);
+    localStorage.setItem('harold_api_key_base', base);
+    apiBaseValue = base;
+    apiKeyValue = key;
+    quickKey.value = key;
+    setStatus('ready', 'ok');
+  }
 
   quickKey.value = apiKeyValue;
   saveQuickKey.addEventListener('click', function () {
+    if (!requireBackend(addLine)) return;
     const key = quickKey.value.trim();
     if (!key) {
       addLine('Enter an API key before saving.', 'err');
       quickKey.focus();
       return;
     }
-    try {
-      localStorage.setItem('harold_api_key', key);
-    } catch (error) {
+    try { saveSettings(apiBaseValue, key); }
+    catch (error) {
       addLine('Could not save the API key in this browser: ' + error.message, 'err');
       return;
     }
-    apiKeyValue = key;
     addLine('API key saved in this browser.', 'sys');
   });
 
   function openApi() {
     apiBase.value = apiBaseValue;
     apiKey.value = apiKeyValue;
+    apiError.textContent = '';
     apiOverlay.style.display = 'block';
     apiModal.style.display = 'block';
-    setTimeout(function () { apiBase.focus(); }, 50);
+    apiBase.focus();
   }
   function closeApi() {
     apiOverlay.style.display = 'none';
     apiModal.style.display = 'none';
   }
   apiBtn.addEventListener('click', openApi);
-  apiClose.addEventListener('click', closeApi);
+  document.getElementById('apiClose').addEventListener('click', closeApi);
   apiOverlay.addEventListener('click', closeApi);
-  apiSave.addEventListener('click', function () {
-    const base = apiBase.value.trim().replace(/\/$/, '');
-    const key = apiKey.value.trim();
-    if (!base) { addLine('API Base URL is required.', 'err'); apiBase.focus(); return; }
-    if (!key) { addLine('API key is required.', 'err'); apiKey.focus(); return; }
-    try {
-      localStorage.setItem('harold_api_base', base);
-      localStorage.setItem('harold_api_key', key);
-    } catch (error) {
-      addLine('Could not save API settings in this browser: ' + error.message, 'err');
+  apiBase.addEventListener('input', function () {
+    if (normalizeBase(apiBase.value) !== apiBaseValue) apiKey.value = '';
+  });
+  document.getElementById('apiSave').addEventListener('click', function () {
+    const base = normalizeBase(apiBase.value);
+    if (!base) {
+      apiError.textContent = 'Enter an HTTPS origin or an HTTPS API URL ending in /v1.';
+      apiBase.focus();
       return;
     }
-    apiBaseValue = base;
-    apiKeyValue = key;
-    quickKey.value = key;
+    try { saveSettings(base, apiKey.value.trim()); }
+    catch (error) {
+      apiError.textContent = 'Could not save API settings in this browser: ' + error.message;
+      return;
+    }
     addLine('API settings saved in this browser.', 'sys');
     closeApi();
   });
-  apiReset.addEventListener('click', function () {
+  document.getElementById('apiReset').addEventListener('click', function () {
     apiBase.value = DEFAULT_BASE;
-    apiKey.value = '';
+    apiKey.value = DEFAULT_BASE === apiBaseValue ? apiKeyValue : '';
+    apiError.textContent = '';
   });
 
   // ---- photo upload / enhance ----
@@ -479,11 +512,18 @@
     photoNote.style.display = text ? 'block' : 'none';
   }
 
-  photoBtn.addEventListener('click', function () { photoInput.click(); });
+  photoBtn.addEventListener('click', function () {
+    if (requireBackend(addLine)) photoInput.click();
+  });
 
   photoInput.addEventListener('change', async function () {
     const file = photoInput.files && photoInput.files[0];
     if (!file || photoBusy) return;
+    if (!requireBackend(addLine)) {
+      photoInput.value = '';
+      return;
+    }
+    const backend = new URL(apiBaseValue).origin;
     if (file.size > 10 * 1024 * 1024) {
       note('Photo must be 10 MB or smaller.');
       photoInput.value = '';
@@ -496,7 +536,7 @@
     const body = new FormData();
     body.append('file', file);
     try {
-      const res = await fetch(BACKEND + '/api/images/enhance', {
+      const res = await fetch(backend + '/api/images/enhance', {
         method: 'POST', body, signal: AbortSignal.timeout(90000)
       });
       let data = null;
@@ -505,7 +545,7 @@
       if (data.ok !== true || !/^\/images\/enhanced-[a-f0-9]{32}\.jpg$/.test(data.url)) {
         throw new Error('Unexpected photo response');
       }
-      const url = BACKEND + data.url;
+      const url = backend + data.url;
       addLine((data.message || 'Enhanced photo ready.') + '\n![Enhanced photo](' + url + ')\n[Download](' + url + ')', 'bot');
       note('');
     } catch (err) {
@@ -518,10 +558,10 @@
     }
   });
 
-  addLine('Harold terminal ready. Type a message and press Enter.', 'sys');
-  setStatus('ready', 'ok');
+  addLine(apiBaseValue ? 'Harold terminal ready. Type a message and press Enter.'
+    : 'Open API Settings to enter Harold’s HTTPS URL.', 'sys');
+  setStatus(apiBaseValue ? 'ready' : 'setup needed', apiBaseValue ? 'ok' : '');
   input.focus();
-})();
 
 // ---- Side self-talk window ----
 (function () {
@@ -605,9 +645,8 @@
   async function sideSendMsg() {
     const text = sideInput.value.trim();
     if (!text || sideBusy) return;
-    const apiBase = localStorage.getItem('harold_api_base') || 'https://lubuntu.tail239f3d.ts.net/v1';
-    const apiKey = localStorage.getItem('harold_api_key') || '';
-    if (!apiKey) {
+    if (!requireBackend(sideAdd)) return;
+    if (!apiKeyValue) {
       sideAdd('Enter and save an API key in the top bar before sending.', 'err');
       return;
     }
@@ -618,9 +657,9 @@
     sideBusy = true;
     sideSend.disabled = true;
     try {
-      const res = await fetch(apiBase + '/chat/completions?self=1', {
+      const res = await fetch(apiBaseValue + '/chat/completions?self=1', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKeyValue },
         body: JSON.stringify({ model: 'harold-chat', messages: sideHistory.slice(-SIDE_MAX), temperature: 0.7 })
       });
       let data = null;
@@ -660,6 +699,7 @@
   panel.querySelector('#sideHead').appendChild(sideClear);
 
   restoreSide();
+})();
 })();
 </script>
 </body>
