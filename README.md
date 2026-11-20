@@ -10,6 +10,8 @@ endpoint is served by Harold on Lubuntu.
   backend address changes. Chat, self-talk, and image requests use that backend.
 - The public gateway accepts chat-only and image requests without a browser API
   key. Coding and tool-enabled API requests remain protected by server auth.
+- Attached chat images are previewed locally before sending. Enhance displays
+  the processed image and a download link; its output is accessible by link.
 - Before switching production, verify the tunnel supports browser CORS and
   `POST /v1/chat/completions`, `POST /api/chat/images`, `POST /api/chat`, and
   `POST /api/images/enhance`. A healthy `/health` endpoint alone is not enough.

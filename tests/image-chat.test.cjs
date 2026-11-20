@@ -15,6 +15,7 @@ function setup(fetch, timer = setTimeout, base = 'https://example.test/v1') {
       get value() { return value; },
       set value(next) { value = next; if (!next && id === 'chatPhoto') this.files = []; },
       addEventListener(type, handler) { this.listeners[type] = handler; },
+      removeAttribute(name) { delete this[name]; },
       appendChild(child) { this.children.push(child); },
       focus() {}, click() {},
     };
@@ -129,6 +130,8 @@ test('image question uploads then sends image ID and previous history', async ()
   Object.defineProperty(file, 'name', { value: 'sample.png' });
   app.elements.get('chatPhoto').files = [file];
   app.elements.get('chatPhoto').listeners.change();
+  assert.equal(app.elements.get('chatPhotoPreview').hidden, false);
+  assert.match(app.elements.get('chatPhotoPreview').src, /^blob:/);
   input.value = 'What color?';
   await app.elements.get('send').listeners.click();
   assert.equal(calls[1].url, 'https://example.test/api/chat/images');
@@ -138,8 +141,36 @@ test('image question uploads then sends image ID and previous history', async ()
   assert.equal(body.image_id, 'a'.repeat(32));
   assert.deepEqual(body.history, [{ role: 'user', content: 'hello' }, { role: 'assistant', content: 'Hello' }]);
   assert.equal(app.elements.get('chatPhoto').files.length, 0);
+  assert.equal(app.elements.get('chatPhotoPreview').hidden, true);
+  assert.equal(app.elements.get('chatPhotoPreview').src, undefined);
   const history = JSON.parse(app.storage.get('harold_main_history'));
   assert.equal(history.at(-1).content, 'The rectangle is red.');
+});
+
+test('removing or replacing an attachment clears its preview', () => {
+  const app = setup(async () => response({}));
+  const picker = app.elements.get('chatPhoto');
+  const preview = app.elements.get('chatPhotoPreview');
+  picker.files = [new Blob(['image'], { type: 'image/png' })];
+  picker.listeners.change();
+  assert.equal(preview.hidden, false);
+  app.elements.get('removePhoto').listeners.click();
+  assert.equal(preview.hidden, true);
+  assert.equal(preview.src, undefined);
+  picker.files = [new Blob(['image'], { type: 'image/png' })];
+  picker.listeners.change();
+  picker.files = [{ type: 'text/plain', size: 1 }];
+  picker.listeners.change();
+  assert.equal(preview.hidden, true);
+  assert.equal(preview.src, undefined);
+});
+
+test('reports the HTTP status when an image upload returns non-JSON', async () => {
+  const app = setup(async () => ({ ok: false, status: 500, json: async () => { throw new SyntaxError('invalid JSON'); } }));
+  app.elements.get('chatPhoto').files = [new Blob(['image'], { type: 'image/png' })];
+  app.elements.get('chatPhoto').listeners.change();
+  await app.elements.get('send').listeners.click();
+  assert.match(app.elements.get('log').children.at(-1).children[0].textContent, /HTTP 500/);
 });
 
 test('photo enhancement uses the configured backend for uploads and output links', async () => {

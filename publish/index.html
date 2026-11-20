@@ -44,6 +44,7 @@
   .self { color: #ffd27a; }
   .self::before { content: "self> "; color: #ffd27a; }
   .line img { display: block; max-width: 100%; max-height: 60vh; height: auto; margin: 4px 0 10px; border-radius: 4px; border: 1px solid var(--border); }
+  #chatPhotoPreview { max-width: min(240px, 90vw); max-height: 160px; object-fit: contain; margin: 0 14px; border: 1px solid var(--border); border-radius: 4px; }
   .line a { color: var(--accent); }
   /* Side self-talk window */
   #sidePanel {
@@ -94,6 +95,7 @@
     <button class="btn" id="discardQueue" type="button" hidden>Discard failed message</button>
   </div>
   <p id="attachmentNote" role="status" style="margin:6px 14px;color:var(--dim);font-size:12px;">Attach a JPEG, PNG or WebP (up to 10 MB / 20 megapixels) and ask about it. Attachments expire after 7 days and are removed during server cleanup. They may be sent to external vision providers.</p>
+  <img id="chatPhotoPreview" alt="Preview of attached image" hidden>
   <button class="btn" id="removePhoto" type="button" hidden>Remove attached image</button>
   <p id="photoNote" style="margin:6px 14px 0;color:var(--dim);font-size:12px;">Enhance adjusts color, contrast and sharpness; results are accessible by link, so do not upload private photos.</p>
 </div>
@@ -138,6 +140,7 @@
   const statusEl = document.getElementById('status');
   const clearBtn = document.getElementById('clearBtn');
   const chatPhoto = document.getElementById('chatPhoto');
+  const chatPhotoPreview = document.getElementById('chatPhotoPreview');
   const attachPhoto = document.getElementById('attachPhoto');
   const removePhoto = document.getElementById('removePhoto');
   const attachmentNote = document.getElementById('attachmentNote');
@@ -149,6 +152,7 @@
   let processingQueue = false;
   let queuePaused = false;
   let photoBusy = false;
+  let previewUrl = '';
   const MAIN_KEY = 'harold_main_history';
 
   function persistMain() {
@@ -246,6 +250,7 @@
     input.value = '';
     if (file) {
       chatPhoto.value = '';
+      clearPhotoPreview();
       removePhoto.hidden = true;
       attachmentNote.textContent = 'Image queued. Attach another image to send with a different message.';
     }
@@ -269,14 +274,15 @@
           const formData = new FormData();
           formData.append('file', item.file);
           const upload = await fetch(backend + '/api/chat/images', { method: 'POST', body: formData });
-          const result = await upload.json();
-          if (upload.status === 429 && typeof result.error === 'string' && /rate limit/i.test(result.error)) {
+          let result = null;
+          try { result = await upload.json(); } catch (e) { result = null; }
+          if (upload.status === 429 && result && typeof result.error === 'string' && /rate limit/i.test(result.error)) {
             updateQueueStatus('Image upload rate limited; retrying in 65 seconds. ' + queue.length + ' message(s) queued.');
             await new Promise(resolve => setTimeout(resolve, 65000));
             continue;
           }
-          if (!upload.ok) throw new Error(result.error || ('HTTP ' + upload.status));
-          if (result.ok !== true || typeof result.image_id !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(result.image_id)) {
+          if (!upload.ok) throw new Error((result && result.error) || ('HTTP ' + upload.status));
+          if (!result || result.ok !== true || typeof result.image_id !== 'string' || !/^[A-Za-z0-9_-]{32}$/.test(result.image_id)) {
             throw new Error('Unexpected image upload response');
           }
           item.imageId = result.image_id;
@@ -445,21 +451,36 @@
   const photoBtn = document.getElementById('photoBtn');
   const photoNote = document.getElementById('photoNote');
 
+  function clearPhotoPreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = '';
+    chatPhotoPreview.hidden = true;
+    chatPhotoPreview.removeAttribute('src');
+  }
+
   attachPhoto.addEventListener('click', function () { chatPhoto.click(); });
   chatPhoto.addEventListener('change', function () {
     const file = chatPhoto.files && chatPhoto.files[0];
-    if (!file) return;
+    clearPhotoPreview();
+    if (!file) {
+      removePhoto.hidden = true;
+      return;
+    }
     if (file.size > 10 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
       chatPhoto.value = '';
       removePhoto.hidden = true;
       attachmentNote.textContent = 'Choose a JPEG, PNG or WebP image no larger than 10 MB.';
       return;
     }
+    previewUrl = URL.createObjectURL(file);
+    chatPhotoPreview.src = previewUrl;
+    chatPhotoPreview.hidden = false;
     attachmentNote.textContent = 'Attached: ' + file.name + '. Send with a question. The image may be sent to external vision providers.';
     removePhoto.hidden = false;
   });
   removePhoto.addEventListener('click', function () {
     chatPhoto.value = '';
+    clearPhotoPreview();
     removePhoto.hidden = true;
     attachmentNote.textContent = 'Image removed.';
   });
