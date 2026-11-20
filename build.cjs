@@ -1,7 +1,8 @@
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 
-const value = (process.env.API_BASE || '').trim();
+const DEFAULT_API_BASE = 'https://lubuntu.tail239f3d.ts.net:8443/v1';
+const value = (process.env.API_BASE || DEFAULT_API_BASE).trim();
 let base = '';
 if (value) {
   let url;

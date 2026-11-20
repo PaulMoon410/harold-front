@@ -66,6 +66,18 @@ test('sends chat without asking for or including an API key', async () => {
   assert.equal(app.storage.has('harold_api_key_base'), false);
 });
 
+test('uses the Lubuntu HTTPS API when no endpoint has been saved', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ choices: [{ message: { content: 'hello' } }] });
+  }, setTimeout, '');
+  app.elements.get('input').value = 'hello';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[0].url, 'https://lubuntu.tail239f3d.ts.net:8443/v1/chat/completions');
+  assert.equal(JSON.parse(calls[0].options.body).model, 'harold-chat');
+});
+
 test('API URL settings update the next chat request without reloading', async () => {
   const calls = [];
   const app = setup(async (url, options) => {
@@ -84,15 +96,18 @@ test('API URL settings update the next chat request without reloading', async ()
   assert.equal(calls[1].options.headers.Authorization, undefined);
 });
 
-test('rejects insecure endpoints without sending a request', async () => {
-  let requests = 0;
-  const app = setup(() => { requests++; }, setTimeout, '');
+test('rejects insecure endpoints and keeps the safe default', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ choices: [{ message: { content: 'hello' } }] });
+  }, setTimeout, '');
   app.elements.get('apiBase').value = 'http://pixel.example.test/v1';
   app.elements.get('apiSave').listeners.click();
   assert.match(app.elements.get('apiError').textContent, /HTTPS/);
   app.elements.get('input').value = 'hello';
   await app.elements.get('send').listeners.click();
-  assert.equal(requests, 0);
+  assert.equal(calls[0].url, 'https://lubuntu.tail239f3d.ts.net:8443/v1/chat/completions');
 });
 
 function response(data, ok = true) {
