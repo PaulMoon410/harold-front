@@ -64,7 +64,7 @@ test('sends chat without asking for or including an API key', async () => {
   await app.elements.get('send').listeners.click();
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'https://example.test/v1/chat/completions');
-  assert.equal(JSON.parse(calls[0].options.body).model, 'harold-chat');
+  assert.equal(JSON.parse(calls[0].options.body).model, 'harold');
   assert.equal(calls[0].options.headers['Content-Type'], 'application/json');
   assert.equal(calls[0].options.headers.Authorization, undefined);
   assert.equal(Object.keys(calls[0].options.headers).length, 1);
@@ -81,7 +81,7 @@ test('uses the Lubuntu HTTPS API when no endpoint has been saved', async () => {
   app.elements.get('input').value = 'hello';
   await app.elements.get('send').listeners.click();
   assert.equal(calls[0].url, 'https://lubuntu.tail239f3d.ts.net:8443/v1/chat/completions');
-  assert.equal(JSON.parse(calls[0].options.body).model, 'harold-chat');
+  assert.equal(JSON.parse(calls[0].options.body).model, 'harold');
 });
 
 test('API URL settings update the next chat request without reloading', async () => {
