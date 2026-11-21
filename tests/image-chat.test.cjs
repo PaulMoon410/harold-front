@@ -188,6 +188,35 @@ test('photo enhancement uses the configured backend for uploads and output links
   assert.ok(output.children.some(child => child.src === 'https://example.test' + imagePath));
 });
 
+test('creates an image without an API key and displays its preview', async () => {
+  const calls = [];
+  let finish;
+  const app = setup((url, options) => {
+    calls.push({ url, options });
+    return new Promise(resolve => { finish = resolve; });
+  });
+  app.elements.get('input').value = 'a blue circle';
+  const pending = app.elements.get('generateImage').listeners.click();
+  assert.equal(app.elements.get('imageActivity').hidden, false);
+  assert.equal(calls[0].url, 'https://example.test/api/public/images/generate');
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+  assert.equal(JSON.parse(calls[0].options.body).prompt, 'a blue circle');
+  finish(response({ ok: true, url: '/images/generated-' + 'a'.repeat(32) + '.png' }));
+  await pending;
+  assert.equal(app.elements.get('imageActivity').hidden, true);
+  const output = app.elements.get('log').children.at(-1);
+  assert.ok(output.children.some(child => child.src === 'https://example.test/images/generated-' + 'a'.repeat(32) + '.png'));
+});
+
+test('does not silently ignore an attached image when creating from text', async () => {
+  const app = setup(() => { throw new Error('unexpected request'); });
+  app.elements.get('input').value = 'make a picture';
+  app.elements.get('chatPhoto').files = [new Blob(['image'], { type: 'image/png' })];
+  await app.elements.get('generateImage').listeners.click();
+  assert.equal(app.elements.get('input').value, 'make a picture');
+  assert.match(app.elements.get('log').children.at(-1).children[0].textContent, /Remove the attached image/);
+});
+
 test('activity shows actual upload and response stages and clears on completion', async () => {
   let finishUpload;
   let finishChat;

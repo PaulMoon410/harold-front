@@ -92,10 +92,12 @@
     <button class="btn" id="attachPhoto" type="button">Attach image</button>
     <input type="file" id="photo" accept="image/jpeg,image/png,image/webp" hidden>
     <button class="btn" id="photoBtn" type="button" title="Upload photo to enhance">Enhance</button>
+    <button class="btn" id="generateImage" type="button" title="Create an image from the description">Create image</button>
     <button id="send" type="button">Send</button>
   </div>
   <div id="chatActivity" class="activity" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="chatActivityText"></span></div>
   <div id="photoActivity" class="activity" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="photoActivityText"></span></div>
+  <div id="imageActivity" class="activity" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="imageActivityText"></span></div>
   <p id="queueStatus" role="status" style="margin:6px 14px;color:var(--dim);font-size:12px;">Queued messages stay in this tab until sent.</p>
   <div style="display:flex;gap:8px;margin:0 14px;">
     <button class="btn" id="retryQueue" type="button" hidden>Retry message</button>
@@ -104,7 +106,7 @@
   <p id="attachmentNote" role="status" style="margin:6px 14px;color:var(--dim);font-size:12px;">Attach a JPEG, PNG or WebP (up to 10 MB / 20 megapixels) and ask about it. Attachments expire after 7 days and are removed during server cleanup. They may be sent to external vision providers.</p>
   <img id="chatPhotoPreview" alt="Preview of attached image" hidden>
   <button class="btn" id="removePhoto" type="button" hidden>Remove attached image</button>
-  <p id="photoNote" style="margin:6px 14px 0;color:var(--dim);font-size:12px;">Enhance adjusts color, contrast and sharpness; results are accessible by link, so do not upload private photos.</p>
+  <p id="photoNote" style="margin:6px 14px 0;color:var(--dim);font-size:12px;">Enhance adjusts color, contrast and sharpness. Image descriptions are sent to an external provider; results are accessible by link, so do not use private content.</p>
 </div>
 
 <!-- API settings window -->
@@ -155,6 +157,9 @@
   const chatActivityText = document.getElementById('chatActivityText');
   const photoActivity = document.getElementById('photoActivity');
   const photoActivityText = document.getElementById('photoActivityText');
+  const imageActivity = document.getElementById('imageActivity');
+  const imageActivityText = document.getElementById('imageActivityText');
+  const generateImage = document.getElementById('generateImage');
   const queueStatus = document.getElementById('queueStatus');
   const retryQueue = document.getElementById('retryQueue');
   const discardQueue = document.getElementById('discardQueue');
@@ -163,6 +168,7 @@
   let processingQueue = false;
   let queuePaused = false;
   let photoBusy = false;
+  let imageBusy = false;
   let previewUrl = '';
   const MAIN_KEY = 'harold_main_history';
 
@@ -516,6 +522,47 @@
 
   photoBtn.addEventListener('click', function () {
     if (requireBackend(addLine)) photoInput.click();
+  });
+
+  generateImage.addEventListener('click', async function () {
+    if (imageBusy || !requireBackend(addLine)) return;
+    const prompt = input.value.trim();
+    if (!prompt || prompt.length > 1000) {
+      addLine('Enter an image description of up to 1000 characters.', 'err');
+      return;
+    }
+    if (chatPhoto.files && chatPhoto.files.length) {
+      addLine('Remove the attached image before creating a new image from text.', 'err');
+      return;
+    }
+    const backend = new URL(apiBaseValue).origin;
+    input.value = '';
+    autoResize();
+    addLine('Create image: ' + prompt, 'user');
+    imageBusy = true;
+    generateImage.disabled = true;
+    showActivity(imageActivity, imageActivityText, 'Generating image with the free provider...');
+    try {
+      const res = await fetch(backend + '/api/public/images/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }), signal: AbortSignal.timeout(240000)
+      });
+      let data = null;
+      try { data = await res.json(); } catch (e) { data = null; }
+      if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+      if (!data || data.ok !== true || !/^\/images\/generated-[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(data.url)) {
+        throw new Error('Unexpected image response');
+      }
+      const url = backend + data.url;
+      addLine('Image ready.\n![Generated image](' + url + ')\n[Download](' + url + ')', 'bot');
+    } catch (err) {
+      addLine('Could not generate image: ' + (err.message || err), 'err');
+    } finally {
+      imageBusy = false;
+      generateImage.disabled = false;
+      showActivity(imageActivity, imageActivityText, '');
+      input.focus();
+    }
   });
 
   photoInput.addEventListener('change', async function () {

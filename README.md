@@ -12,6 +12,9 @@ endpoint is served by Harold on Lubuntu.
   key. Coding and tool-enabled API requests remain protected by server auth.
 - Attached chat images are previewed locally before sending. Enhance displays
   the processed image and a download link; its output is accessible by link.
+- To create an image, enter a description and select **Create image**. The
+  description goes to an external free provider; generated images are accessible
+  by link and eligible for cleanup after seven days. Public generation is rate limited.
 - The activity indicator shows observable upload, response, and retry stages.
   The backend does not currently stream its internal reasoning or tool steps.
 - Before switching production, verify the tunnel supports browser CORS and
