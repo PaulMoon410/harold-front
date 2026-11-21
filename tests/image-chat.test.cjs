@@ -393,7 +393,8 @@ test('authenticated create button uses image learning and retains the result in 
   const app = setup(async (url, options) => {
     calls.push({ url, options });
     if (url.endsWith('/api/images/generate')) return response({
-      ok: true, images: [{ local: '/images/waffle.png', learning: { error: 'Visual memory failed.' } }],
+      ok: true, images: [{ local: '/images/waffle.png', page: 'https://www.geocities.ws/paulmoon410/ai/waffle.png.html',
+        learning: { error: 'Visual memory failed.', warning: 'Waffle fidelity warning.' } }],
     });
     return response({ response: 'Edited.' });
   });
@@ -404,10 +405,12 @@ test('authenticated create button uses image learning and retains the result in 
   assert.equal(calls[0].url, 'https://example.test/api/images/generate');
   assert.equal(calls[0].options.headers.Authorization, 'Bearer test-key');
   assert.match(app.elements.get('log').children.at(-1).children.at(-1).textContent, /Visual memory failed/);
+  assert.match(app.elements.get('log').children.at(-1).children.at(-1).textContent, /Waffle fidelity warning/);
   app.elements.get('input').value = 'Change it to blue';
   await app.elements.get('send').listeners.click();
   assert.equal(calls[1].url, 'https://example.test/api/chat');
   assert.match(JSON.parse(calls[1].options.body).history.at(-1).content, /waffle.png/);
+  assert.match(JSON.parse(calls[1].options.body).history.at(-1).content, /GeoCities HTML page.*waffle.png.html/);
 });
 
 test('routes surreal drawing requests without requiring the word picture', async () => {

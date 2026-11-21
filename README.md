@@ -35,6 +35,10 @@ endpoint is served by Harold on Lubuntu.
   can submit the actual prior image to the edit provider. Image edits require a
   configured editing provider and may incur its costs. Image links resolve against
   Harold's backend, not the Render static site.
+- Authenticated generated images/music retain local chat previews and add a
+  GeoCities HTML share link with a preview/player and download. FTP or page-upload
+  errors remain visible; GeoCities may require a Cloudflare check. No ad network
+  is connected. Anonymous images still depend on free-provider availability.
 - Learning uses observations of the returned image, not an invented description
   derived only from the prompt. It retains prompt/result concepts and edit lineage,
   not a locally trained image generator. Visual-learning failures remain visible
