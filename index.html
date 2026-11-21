@@ -79,7 +79,7 @@
   <div class="bar">
     <span class="title">HAROLD TERMINAL</span>
     <label for="quickKey" class="status">API key</label>
-    <input id="quickKey" type="password" autocomplete="off" placeholder="Optional API key">
+    <input id="quickKey" type="password" autocomplete="off" placeholder="Harold API key">
     <button class="btn" id="saveQuickKey" type="button">Save key</button>
     <span id="status" class="status">ready</span>
     <span class="spacer"></span>
@@ -123,9 +123,9 @@
   </div>
   <label for="apiBase" style="display:block;font-size:10px;color:var(--dim);margin-bottom:4px;">API Base URL</label>
   <input id="apiBase" type="url" placeholder="https://api.example.com/v1" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;margin-bottom:14px;">
-  <label for="apiKey" style="display:block;font-size:10px;color:var(--dim);margin-bottom:4px;">API Key (optional)</label>
+  <label for="apiKey" style="display:block;font-size:10px;color:var(--dim);margin-bottom:4px;">API Key</label>
   <input id="apiKey" type="password" autocomplete="off" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;">
-  <p style="color:var(--dim);font-size:10px;">The key is sent to the selected HTTPS API for chat and kept only for this tab's session. Leave blank for public keyless chat.</p>
+  <p style="color:var(--dim);font-size:10px;">Harold requires an API key. The key is sent only to the selected HTTPS API and kept only for this tab's session. Re-enter it after switching from the retired gateway.</p>
   <p id="apiError" role="alert" style="color:var(--fg);font-size:10px;"></p>
   <div style="display:flex;gap:8px;justify-content:flex-end;">
     <button class="btn" id="apiReset" type="button">Reset to default</button>
@@ -136,7 +136,7 @@
 <script>
 (function () {
   const DEFAULT_BASE = /* API_BASE */ '';
-  const legacyBase = 'https://lubuntu.tail239f3d.ts.net/v1';
+  const legacyBase = 'https://lubuntu.tail239f3d.ts.net:8443/v1';
   const savedBase = normalizeBase(localStorage.getItem('harold_api_base') || '');
   let apiBaseValue = savedBase && savedBase !== legacyBase ? savedBase : DEFAULT_BASE;
   localStorage.removeItem('harold_api_key');

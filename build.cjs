@@ -1,7 +1,7 @@
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
 
-const DEFAULT_API_BASE = 'https://lubuntu.tail239f3d.ts.net:8443/v1';
+const DEFAULT_API_BASE = 'https://lubuntu.tail239f3d.ts.net/v1';
 const value = (process.env.API_BASE || DEFAULT_API_BASE).trim();
 let base = '';
 if (value) {
@@ -12,6 +12,7 @@ if (value) {
     throw new Error('API_BASE must be an HTTPS origin or an HTTPS API URL ending in /v1.');
   }
   base = url.origin + '/v1';
+  if (base === 'https://lubuntu.tail239f3d.ts.net:8443/v1') base = DEFAULT_API_BASE;
 }
 
 const source = readFileSync(join(__dirname, 'index.html'), 'utf8');

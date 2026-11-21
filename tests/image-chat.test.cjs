@@ -113,7 +113,7 @@ test('uses the Lubuntu HTTPS API when no endpoint has been saved', async () => {
   }, setTimeout, '');
   app.elements.get('input').value = 'hello';
   await app.elements.get('send').listeners.click();
-  assert.equal(calls[0].url, 'https://lubuntu.tail239f3d.ts.net:8443/v1/chat/completions');
+  assert.equal(calls[0].url, 'https://lubuntu.tail239f3d.ts.net/v1/chat/completions');
   assert.equal(JSON.parse(calls[0].options.body).model, 'harold');
 });
 
@@ -133,6 +133,42 @@ test('API URL settings update the next chat request without reloading', async ()
   await app.elements.get('sideSend').listeners.click();
   assert.equal(calls[1].url, 'https://pixel.example.test/v1/chat/completions?self=1');
   assert.equal(calls[1].options.headers.Authorization, undefined);
+});
+
+test('migrates the retired gateway without forwarding its session key', async () => {
+  const oldBase = 'https://lubuntu.tail239f3d.ts.net:8443/v1';
+  const session = new Map([['harold_api_key_session', JSON.stringify({ base: oldBase, key: 'old-key' })]]);
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ choices: [{ message: { content: 'hello' } }] });
+  }, setTimeout, oldBase, session);
+  app.elements.get('input').value = 'hello';
+  await app.elements.get('send').listeners.click();
+  app.elements.get('sideInput').value = 'Think';
+  await app.elements.get('sideSend').listeners.click();
+  assert.deepEqual(calls.map(call => call.url), [
+    'https://lubuntu.tail239f3d.ts.net/v1/chat/completions',
+    'https://lubuntu.tail239f3d.ts.net/v1/chat/completions?self=1',
+  ]);
+  for (const call of calls) {
+    assert.equal(JSON.parse(call.options.body).model, 'harold');
+    assert.equal(call.options.headers.Authorization, undefined);
+  }
+});
+
+test('preserves the main API and its existing session key', async () => {
+  const base = 'https://lubuntu.tail239f3d.ts.net/v1';
+  const session = new Map([['harold_api_key_session', JSON.stringify({ base, key: 'test-key' })]]);
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ choices: [{ message: { content: 'hello' } }] });
+  }, setTimeout, base, session);
+  app.elements.get('input').value = 'hello';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[0].url, base + '/chat/completions');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer test-key');
 });
 
 test('optional key authenticates chat and self-talk and can be cleared', async () => {
@@ -196,7 +232,7 @@ test('rejects insecure endpoints and keeps the safe default', async () => {
   assert.match(app.elements.get('apiError').textContent, /HTTPS/);
   app.elements.get('input').value = 'hello';
   await app.elements.get('send').listeners.click();
-  assert.equal(calls[0].url, 'https://lubuntu.tail239f3d.ts.net:8443/v1/chat/completions');
+  assert.equal(calls[0].url, 'https://lubuntu.tail239f3d.ts.net/v1/chat/completions');
 });
 
 function response(data, ok = true) {

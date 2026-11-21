@@ -5,16 +5,17 @@ endpoint is served by Harold on Lubuntu.
 
 - Set the Render build command to `node build.cjs` and the publish directory
   to `publish`. The existing site URL does not need to change.
-- The build defaults `API_BASE` to `https://lubuntu.tail239f3d.ts.net:8443/v1`.
+- The build defaults `API_BASE` to `https://lubuntu.tail239f3d.ts.net/v1`,
+  with model `harold` for chat and self-talk. The retired port-8443 gateway is
+  migrated to this default in both build configuration and saved browser settings.
   Override it with the tunnel's public HTTPS origin or `/v1` URL only if the
   backend address changes. Chat, self-talk, and image requests use that backend.
-- The public gateway accepts chat-only and image requests without a browser API
-  key. Coding and tool-enabled API requests remain protected by server auth.
-- An optional API key can be entered in the top bar or API Settings. It is
+- Harold requires the existing API key for text chat, self-talk, and tools.
+  Enter it in the top bar or API Settings. It is
   stored for the current browser-tab session, tied to the selected HTTPS API,
   and sent to that API for text chat and self-talk. Clear the field and save
-  to remove it. The public chat endpoint does not require or validate the key;
-  entering one does not enable public tool calls.
+  to remove it. Keys saved for the retired gateway are not transferred to the
+  main API: re-enter the key after migration. A saved main-API key is preserved.
 - The **TOOLS: AUTO** toggle enables backend-managed automatic tool selection
   for text chat and self-talk requests to `/v1/chat/completions`. It turns on
   when an API key is available and is off for keyless public chat. Tool use may
