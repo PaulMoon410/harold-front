@@ -222,7 +222,8 @@
       const target = m[2] || m[4] || m[0].replace(/[.,;!?)\]]+$/, '');
       let url;
       try {
-        url = new URL(/^(?:www\.|geocities\.ws\/)/i.test(target) ? 'https://' + target : target, document.baseURI);
+        url = new URL(/^(?:www\.|geocities\.ws\/)/i.test(target) ? 'https://' + target : target,
+          target.startsWith('/images/') ? new URL(apiBaseValue).origin : document.baseURI);
       } catch (error) {
         if (!(error instanceof TypeError)) throw error;
       }
@@ -335,11 +336,15 @@
         showActivity(chatActivity, chatActivityText, item.imageId
           ? 'Image uploaded; waiting for Harold to analyze it...'
           : 'Message sent; waiting for Harold to respond...');
-        const endpoint = item.imageId ? backend + '/api/chat' : base + '/chat/completions' + (item.selfMode ? '?self=1' : '');
+        const createsImage = /^(?:(?:please|can you|could you)\s+)?(?:generate|create|make|draw|render|paint|sketch|produce)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art)\b/i.test(item.text);
+        const hasImage = history.some(turn => turn.image_id || (turn.role === 'assistant' && /\/images\//.test(turn.content)));
+        const refersToImage = hasImage && /\b(?:image|picture|photo|it|that|this)\b/i.test(item.text);
+        const imageChat = Boolean(item.imageId || (!item.selfMode && (createsImage || refersToImage)));
+        const endpoint = imageChat ? backend + '/api/chat' : base + '/chat/completions' + (item.selfMode ? '?self=1' : '');
         const res = await fetch(endpoint, {
           method: 'POST',
-          headers: item.imageId ? { 'Content-Type': 'application/json' } : chatHeaders(base),
-          body: JSON.stringify(item.imageId ? {
+          headers: chatHeaders(base),
+          body: JSON.stringify(imageChat ? {
             prompt: item.text,
             history: history.slice(-20),
             image_id: item.imageId
@@ -369,10 +374,10 @@
           throw new Error(msg);
         }
 
-        const reply = item.imageId ? data && data.response : data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        const reply = imageChat ? data && data.response : data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
         if (typeof reply !== 'string' || !reply.trim()) throw new Error('Unexpected empty server response');
         const out = reply.trim();
-        history.push({ role: 'user', content: item.text });
+        history.push({ role: 'user', content: item.text, ...(item.imageId ? { image_id: item.imageId } : {}) });
         history.push({ role: 'assistant', content: out });
         persistMain();
         addLine(out, item.selfMode ? 'self' : 'bot');
@@ -619,20 +624,37 @@
     addLine('Create image: ' + prompt, 'user');
     imageBusy = true;
     generateImage.disabled = true;
-    showActivity(imageActivity, imageActivityText, 'Generating image with the free provider...');
+    const authenticated = Boolean(apiKeyValue);
+    showActivity(imageActivity, imageActivityText, authenticated
+      ? 'Generating image and learning its visual description...'
+      : 'Generating image with the free provider...');
     try {
-      const res = await fetch(backend + '/api/public/images/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const res = await fetch(backend + (authenticated ? '/api/images/generate' : '/api/public/images/generate'), {
+        method: 'POST', headers: chatHeaders(apiBaseValue),
         body: JSON.stringify({ prompt }), signal: AbortSignal.timeout(240000)
       });
       let data = null;
       try { data = await res.json(); } catch (e) { data = null; }
       if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-      if (!data || data.ok !== true || !/^\/images\/generated-[a-f0-9]{32}\.(?:jpg|png|webp)$/.test(data.url)) {
+      const image = authenticated && data && data.images && data.images[0];
+      if (image && image.error) throw new Error(image.error);
+      const imagePath = authenticated ? image && image.local : data && data.url;
+      if (!data || data.ok !== true || typeof imagePath !== 'string' ||
+          !/^\/images\/[A-Za-z0-9._-]+\.(?:jpg|jpeg|png|webp|gif)$/.test(imagePath)) {
         throw new Error('Unexpected image response');
       }
-      const url = backend + data.url;
-      addLine('Image ready.\n![Generated image](' + url + ')\n[Download](' + url + ')', 'bot');
+      const url = backend + imagePath;
+      let answer = 'Image ready.\n![Generated image](' + url + ')\n[Download](' + url + ')';
+      if (image && image.learning) {
+        if (image.learning.error) answer += '\n\n' + image.learning.error;
+        else if (image.learning.memory && /failed|failures|locally|not saved/i.test(image.learning.memory)) {
+          answer += '\n\nMemory: ' + image.learning.memory;
+        }
+      }
+      history.push({ role: 'user', content: 'Create an image: ' + prompt });
+      history.push({ role: 'assistant', content: answer });
+      persistMain();
+      addLine(answer, 'bot');
     } catch (err) {
       addLine('Could not generate image: ' + (err.message || err), 'err');
     } finally {

@@ -332,6 +332,49 @@ test('creates an image without an API key and displays its preview', async () =>
   assert.ok(output.children.some(child => child.src === 'https://example.test/images/generated-' + 'a'.repeat(32) + '.png'));
 });
 
+test('natural image requests bypass native text tools and preserve follow-up references', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ response: '![waffle](/images/waffle.png)' });
+  });
+  app.elements.get('quickKey').value = 'test-key';
+  app.elements.get('saveQuickKey').listeners.click();
+  app.elements.get('input').value = 'Make me a picture of a waffle fighting a pancake with light sabers';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[0].url, 'https://example.test/api/chat');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer test-key');
+  assert.equal(JSON.parse(calls[0].options.body).tool_choice, undefined);
+  const output = app.elements.get('log').children.at(-1);
+  assert.ok(output.children.some(child => child.src === 'https://example.test/images/waffle.png'));
+  app.elements.get('input').value = 'Change the last picture to blue';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[1].url, 'https://example.test/api/chat');
+  assert.match(JSON.parse(calls[1].options.body).history.at(-1).content, /waffle.png/);
+});
+
+test('authenticated create button uses image learning and retains the result in chat history', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith('/api/images/generate')) return response({
+      ok: true, images: [{ local: '/images/waffle.png', learning: { error: 'Visual memory failed.' } }],
+    });
+    return response({ response: 'Edited.' });
+  });
+  app.elements.get('quickKey').value = 'test-key';
+  app.elements.get('saveQuickKey').listeners.click();
+  app.elements.get('input').value = 'a golden waffle';
+  await app.elements.get('generateImage').listeners.click();
+  assert.equal(calls[0].url, 'https://example.test/api/images/generate');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer test-key');
+  assert.match(app.elements.get('log').children.at(-1).children.at(-1).textContent, /Visual memory failed/);
+  app.elements.get('input').value = 'Change it to blue';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[1].url, 'https://example.test/api/chat');
+  assert.match(JSON.parse(calls[1].options.body).history.at(-1).content, /waffle.png/);
+});
+
 test('does not silently ignore an attached image when creating from text', async () => {
   const app = setup(() => { throw new Error('unexpected request'); });
   app.elements.get('input').value = 'make a picture';

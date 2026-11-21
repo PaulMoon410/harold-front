@@ -24,8 +24,21 @@ endpoint is served by Harold on Lubuntu.
 - Attached chat images are previewed locally before sending. Enhance displays
   the processed image and a download link; its output is accessible by link.
 - To create an image, enter a description and select **Create image**. The
-  description goes to an external free provider; generated images are accessible
-  by link and eligible for cleanup after seven days. Public generation is rate limited.
+  button uses Harold's authenticated image-provider chain when a key is saved,
+  including visual-description learning through FTP/MCF memory. Without a key,
+  it uses the separate rate-limited free endpoint, without shared-memory learning.
+  Generated images are accessible by link; public results are eligible for cleanup
+  after seven days. Do not include private material.
+- Natural requests such as "Make me a picture of a waffle fighting a pancake"
+  go through `/api/chat` instead of the native text-tool route. Generated replies
+  and uploaded-image IDs stay in this chat's history so "change the last picture"
+  can submit the actual prior image to the edit provider. Image edits require a
+  configured editing provider and may incur its costs. Image links resolve against
+  Harold's backend, not the Render static site.
+- Learning uses observations of the returned image, not an invented description
+  derived only from the prompt. It retains prompt/result concepts and edit lineage,
+  not a locally trained image generator. Visual-learning failures remain visible
+  without discarding a successfully generated image.
 - The activity indicator shows observable upload, response, and retry stages.
   The backend does not currently stream its internal reasoning or tool steps.
 - Before switching production, verify the tunnel supports browser CORS and
