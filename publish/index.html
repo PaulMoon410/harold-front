@@ -25,6 +25,7 @@
   .spacer { flex: 1; }
   .btn { background: transparent; color: var(--dim); border: 1px solid var(--border); padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; border-radius: 4px; }
   .btn:hover { color: var(--fg); border-color: var(--dim); }
+  #quickKey { width: 170px; max-width: 45vw; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px; }
   #log { flex: 1; overflow-y: auto; padding: 14px; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
   .line { margin: 0 0 8px 0; }
   .user { color: #e8ffe9; }
@@ -77,6 +78,9 @@
 <div class="wrap">
   <div class="bar">
     <span class="title">HAROLD TERMINAL</span>
+    <label for="quickKey" class="status">API key</label>
+    <input id="quickKey" type="password" autocomplete="off" placeholder="Optional API key">
+    <button class="btn" id="saveQuickKey" type="button">Save key</button>
     <span id="status" class="status">ready</span>
     <span class="spacer"></span>
     <button class="btn" id="selfBtn" type="button">SELF: OFF</button>
@@ -118,6 +122,9 @@
   </div>
   <label for="apiBase" style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px;">API Base URL</label>
   <input id="apiBase" type="url" placeholder="https://api.example.com/v1" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;margin-bottom:14px;">
+  <label for="apiKey" style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px;">API Key (optional)</label>
+  <input id="apiKey" type="password" autocomplete="off" spellcheck="false" style="width:100%;background:#0b100d;color:var(--fg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font:inherit;">
+  <p style="color:var(--dim);font-size:12px;">The key is sent to the selected HTTPS API for chat and kept only for this tab's session. Leave blank for public keyless chat.</p>
   <p id="apiError" role="alert" style="color:var(--fg);font-size:12px;"></p>
   <div style="display:flex;gap:8px;justify-content:flex-end;">
     <button class="btn" id="apiReset" type="button">Reset to default</button>
@@ -133,6 +140,13 @@
   let apiBaseValue = savedBase && savedBase !== legacyBase ? savedBase : DEFAULT_BASE;
   localStorage.removeItem('harold_api_key');
   localStorage.removeItem('harold_api_key_base');
+  let apiKeyValue = '';
+  try {
+    const savedKey = JSON.parse(sessionStorage.getItem('harold_api_key_session') || 'null');
+    if (savedKey && savedKey.base === apiBaseValue && typeof savedKey.key === 'string') apiKeyValue = savedKey.key;
+  } catch (error) {
+    console.error('Could not read the API key from this tab session:', error);
+  }
   const MODEL = 'harold-chat';
 
   function normalizeBase(value) {
@@ -148,6 +162,8 @@
   const sendBtn = document.getElementById('send');
   const statusEl = document.getElementById('status');
   const clearBtn = document.getElementById('clearBtn');
+  const quickKey = document.getElementById('quickKey');
+  const saveQuickKey = document.getElementById('saveQuickKey');
   const chatPhoto = document.getElementById('chatPhoto');
   const chatPhotoPreview = document.getElementById('chatPhotoPreview');
   const attachPhoto = document.getElementById('attachPhoto');
@@ -319,7 +335,7 @@
         const endpoint = item.imageId ? backend + '/api/chat' : base + '/chat/completions' + (item.selfMode ? '?self=1' : '');
         const res = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: item.imageId ? { 'Content-Type': 'application/json' } : chatHeaders(base),
           body: JSON.stringify(item.imageId ? {
             prompt: item.text,
             history: history.slice(-20),
@@ -426,6 +442,7 @@
   const apiOverlay = document.getElementById('apiOverlay');
   const apiModal = document.getElementById('apiModal');
   const apiBase = document.getElementById('apiBase');
+  const apiKey = document.getElementById('apiKey');
   const apiError = document.getElementById('apiError');
 
   function requireBackend(report) {
@@ -435,15 +452,38 @@
     return false;
   }
 
-  function saveSettings(base) {
+  function chatHeaders(base) {
+    return apiKeyValue && base === apiBaseValue
+      ? { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKeyValue }
+      : { 'Content-Type': 'application/json' };
+  }
+
+  function saveSettings(base, key) {
+    if (/[\r\n]/.test(key)) throw new Error('API key cannot contain line breaks.');
+    if (key) sessionStorage.setItem('harold_api_key_session', JSON.stringify({ base, key }));
+    else sessionStorage.removeItem('harold_api_key_session');
     if (base === DEFAULT_BASE) localStorage.removeItem('harold_api_base');
     else localStorage.setItem('harold_api_base', base);
     apiBaseValue = base;
+    apiKeyValue = key;
+    quickKey.value = key;
     setStatus('ready', 'ok');
   }
 
+  quickKey.value = apiKeyValue;
+  saveQuickKey.addEventListener('click', function () {
+    if (!requireBackend(addLine)) return;
+    try { saveSettings(apiBaseValue, quickKey.value.trim()); }
+    catch (error) {
+      addLine('Could not save API settings in this browser: ' + error.message, 'err');
+      return;
+    }
+    addLine(apiKeyValue ? 'API key saved for this tab.' : 'API key cleared.', 'sys');
+  });
+
   function openApi() {
     apiBase.value = apiBaseValue;
+    apiKey.value = apiKeyValue;
     apiError.textContent = '';
     apiOverlay.style.display = 'block';
     apiModal.style.display = 'block';
@@ -456,6 +496,9 @@
   apiBtn.addEventListener('click', openApi);
   document.getElementById('apiClose').addEventListener('click', closeApi);
   apiOverlay.addEventListener('click', closeApi);
+  apiBase.addEventListener('input', function () {
+    if (normalizeBase(apiBase.value) !== apiBaseValue) apiKey.value = '';
+  });
   document.getElementById('apiSave').addEventListener('click', function () {
     const base = normalizeBase(apiBase.value);
     if (!base) {
@@ -463,16 +506,17 @@
       apiBase.focus();
       return;
     }
-    try { saveSettings(base); }
+    try { saveSettings(base, apiKey.value.trim()); }
     catch (error) {
-      apiError.textContent = 'Could not save the API URL in this browser: ' + error.message;
+      apiError.textContent = 'Could not save API settings in this browser: ' + error.message;
       return;
     }
-    addLine('API URL saved in this browser.', 'sys');
+    addLine('API settings saved in this browser.', 'sys');
     closeApi();
   });
   document.getElementById('apiReset').addEventListener('click', function () {
     apiBase.value = DEFAULT_BASE;
+    apiKey.value = DEFAULT_BASE === apiBaseValue ? apiKeyValue : '';
     apiError.textContent = '';
   });
 
@@ -706,7 +750,7 @@
     try {
       const res = await fetch(apiBaseValue + '/chat/completions?self=1', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: chatHeaders(apiBaseValue),
         body: JSON.stringify({ model: 'harold-chat', messages: sideHistory.slice(-SIDE_MAX), temperature: 0.7 })
       });
       let data = null;

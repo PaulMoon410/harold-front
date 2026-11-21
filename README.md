@@ -10,6 +10,11 @@ endpoint is served by Harold on Lubuntu.
   backend address changes. Chat, self-talk, and image requests use that backend.
 - The public gateway accepts chat-only and image requests without a browser API
   key. Coding and tool-enabled API requests remain protected by server auth.
+- An optional API key can be entered in the top bar or API Settings. It is
+  stored for the current browser-tab session, tied to the selected HTTPS API,
+  and sent to that API for text chat and self-talk. Clear the field and save
+  to remove it. The public chat endpoint does not require or validate the key;
+  entering one does not enable public tool calls.
 - Attached chat images are previewed locally before sending. Enhance displays
   the processed image and a download link; its output is accessible by link.
 - To create an image, enter a description and select **Create image**. The

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function setup(fetch, timer = setTimeout, base = 'https://example.test/v1') {
+function setup(fetch, timer = setTimeout, base = 'https://example.test/v1', session = new Map()) {
   const elements = new Map();
   function element(id = '') {
     let value = '';
@@ -39,13 +39,18 @@ function setup(fetch, timer = setTimeout, base = 'https://example.test/v1') {
     setItem(key, value) { storage.set(key, value); },
     removeItem(key) { storage.delete(key); },
   };
+  const sessionStorage = {
+    getItem(key) { return session.get(key) || null; },
+    setItem(key, value) { session.set(key, value); },
+    removeItem(key) { session.delete(key); },
+  };
   const html = fs.readFileSync(path.join(__dirname, '../publish/index.html'), 'utf8');
   const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   vm.runInNewContext(script, {
-    document, localStorage, fetch, URL, FormData, AbortSignal, setTimeout: timer, console,
+    document, localStorage, sessionStorage, fetch, URL, FormData, AbortSignal, setTimeout: timer, console,
     window: { addEventListener() {} },
   });
-  return { elements, storage };
+  return { elements, storage, session };
 }
 
 test('sends chat without asking for or including an API key', async () => {
@@ -95,6 +100,56 @@ test('API URL settings update the next chat request without reloading', async ()
   await app.elements.get('sideSend').listeners.click();
   assert.equal(calls[1].url, 'https://pixel.example.test/v1/chat/completions?self=1');
   assert.equal(calls[1].options.headers.Authorization, undefined);
+});
+
+test('optional key authenticates chat and self-talk and can be cleared', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ choices: [{ message: { content: 'hello' } }] });
+  });
+  app.elements.get('quickKey').value = 'test-key';
+  app.elements.get('saveQuickKey').listeners.click();
+  app.elements.get('input').value = 'hello';
+  await app.elements.get('send').listeners.click();
+  app.elements.get('sideInput').value = 'Think about it';
+  await app.elements.get('sideSend').listeners.click();
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer test-key');
+  assert.equal(calls[1].options.headers.Authorization, 'Bearer test-key');
+  assert.equal(app.storage.has('harold_api_key'), false);
+  assert.equal(JSON.parse(app.session.get('harold_api_key_session')).base, 'https://example.test/v1');
+  app.elements.get('quickKey').value = '';
+  app.elements.get('saveQuickKey').listeners.click();
+  app.elements.get('input').value = 'again';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[2].options.headers.Authorization, undefined);
+  assert.equal(app.session.has('harold_api_key_session'), false);
+});
+
+test('session key is restored only for its configured HTTPS endpoint', async () => {
+  const session = new Map();
+  const first = setup(async () => response({}), setTimeout, 'https://example.test/v1', session);
+  first.elements.get('quickKey').value = 'test-key';
+  first.elements.get('saveQuickKey').listeners.click();
+
+  const calls = [];
+  const restored = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ choices: [{ message: { content: 'hello' } }] });
+  }, setTimeout, 'https://example.test/v1', session);
+  restored.elements.get('input').value = 'hello';
+  await restored.elements.get('send').listeners.click();
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer test-key');
+
+  restored.elements.get('apiBtn').listeners.click();
+  restored.elements.get('apiBase').value = 'https://other.example.test/v1';
+  restored.elements.get('apiBase').listeners.input();
+  assert.equal(restored.elements.get('apiKey').value, '');
+  restored.elements.get('apiSave').listeners.click();
+  restored.elements.get('input').value = 'again';
+  await restored.elements.get('send').listeners.click();
+  assert.equal(calls[1].options.headers.Authorization, undefined);
+  assert.equal(session.has('harold_api_key_session'), false);
 });
 
 test('rejects insecure endpoints and keeps the safe default', async () => {
