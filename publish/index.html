@@ -656,7 +656,8 @@
         throw new Error('Unexpected image response');
       }
       const url = backend + imagePath;
-      let answer = 'Image ready.\n![Generated image](' + url + ')\n[Download](' + url + ')';
+      const downloadUrl = image && image.download_page || url;
+      let answer = 'Image ready.\n![Generated image](' + url + ')\n[Download](' + downloadUrl + ')';
       if (image && image.page) answer += '\n[GeoCities HTML page](' + image.page + ')';
       if (image && image.learning) {
         if (image.learning.error) answer += '\n\n' + image.learning.error;

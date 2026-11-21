@@ -394,6 +394,7 @@ test('authenticated create button uses image learning and retains the result in 
     calls.push({ url, options });
     if (url.endsWith('/api/images/generate')) return response({
       ok: true, images: [{ local: '/images/waffle.png', page: 'https://www.geocities.ws/paulmoon410/ai/waffle.png.html',
+        download_page: 'https://harold-front-x2ay.onrender.com/bake.html?kind=image&file=waffle.png',
         learning: { error: 'Visual memory failed.', warning: 'Waffle fidelity warning.' } }],
     });
     return response({ response: 'Edited.' });
@@ -411,6 +412,7 @@ test('authenticated create button uses image learning and retains the result in 
   assert.equal(calls[1].url, 'https://example.test/api/chat');
   assert.match(JSON.parse(calls[1].options.body).history.at(-1).content, /waffle.png/);
   assert.match(JSON.parse(calls[1].options.body).history.at(-1).content, /GeoCities HTML page.*waffle.png.html/);
+  assert.match(JSON.parse(calls[1].options.body).history.at(-1).content, /\[Download\]\(https:\/\/harold-front.*bake.html/);
 });
 
 test('routes surreal drawing requests without requiring the word picture', async () => {

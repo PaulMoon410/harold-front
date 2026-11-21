@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Harold download</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://lubuntu.tail239f3d.ts.net; img-src 'self' https://lubuntu.tail239f3d.ts.net; media-src https://lubuntu.tail239f3d.ts.net; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'">
+  <style>
+    body{font:17px sans-serif;max-width:850px;margin:30px auto;padding:20px;background:#161126;color:#fff}
+    img{max-width:100%;height:auto}audio{width:100%}a{color:#bfe3ff}
+    label,button,select,input{margin:10px 8px 10px 0}button,a{padding:10px}
+    #controls{border:1px solid #76608f;padding:16px;margin-top:24px}
+  </style>
+</head>
+<body>
+  <h1>Preview and download</h1>
+  <div id="preview"></div>
+  <p><a id="download">Download without contributing</a></p>
+  <section id="controls">
+    <h2>Optional CPU proof test</h2>
+    <p>This is a WASM hashing test, not cryptocurrency mining. It earns no money or Cake credits.
+      Nothing runs until you click Start. It stops when a proof is found or after at most 10 seconds.
+      Downloading does not require participation.</p>
+    <p>CPU use can increase heat, fan noise and battery drain. Avoid this test on a low battery.</p>
+    <label>Workers <select id="threads"><option value="1">1 (recommended)</option><option value="2">2</option></select></label>
+    <label>CPU duty per worker <select id="duty"><option value="10">10%</option><option value="25">25%</option><option value="50">50%</option></select></label>
+    <button id="start" disabled>Start optional CPU test</button>
+    <button id="stop" disabled>Stop</button>
+    <p id="status" role="status">Checking contribution availability...</p>
+  </section>
+  <script>
+  'use strict';
+  const apiBase = /* API_BASE */ '';
+  const backend = new URL(apiBase || 'https://lubuntu.tail239f3d.ts.net/v1').origin;
+  const params = new URLSearchParams(location.search);
+  const kind = params.get('kind');
+  const filename = params.get('file') || '';
+  const status = document.getElementById('status');
+  const start = document.getElementById('start');
+  const stop = document.getElementById('stop');
+  const download = document.getElementById('download');
+  let workers = [], job = null, active = false, verifying = false, watchdog = null, requestController = null;
+  let enabled = false;
+  let generation = 0;
+
+  async function request(action, body, options = {}) {
+    const deadline = AbortSignal.timeout(10000);
+    const res = await fetch(backend + '/api/download-work/' + action, {
+      method: body ? 'POST' : 'GET',
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      ...options,
+      signal: options.signal ? AbortSignal.any([options.signal, deadline]) : deadline,
+    });
+    let data;
+    try { data = await res.json(); } catch { throw new Error('CPU test returned HTTP ' + res.status + ' without JSON.'); }
+    if (!res.ok) throw new Error(data.error || 'CPU test returned HTTP ' + res.status);
+    return data;
+  }
+  function terminate() {
+    workers.forEach(worker => worker.terminate());
+    workers = [];
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = null;
+    active = false;
+    stop.disabled = true;
+  }
+  async function stopTest(message = 'Stopped. You can download without contributing.') {
+    const stoppedGeneration = ++generation;
+    terminate();
+    if (requestController) requestController.abort();
+    requestController = null;
+    const previous = job;
+    job = null;
+    verifying = false;
+    start.disabled = !enabled || document.hidden;
+    status.textContent = message;
+    if (previous) {
+      try { await request('cancel', { id: previous.id }, { keepalive: true }); }
+      catch (error) { if (generation === stoppedGeneration) status.textContent += ' Cleanup: ' + error.message; }
+    }
+  }
+  async function handleWorker(event) {
+    if (!active || verifying) return;
+    if (event.data.type === 'proof') {
+      const verificationGeneration = generation;
+      verifying = true;
+      terminate();
+      status.textContent = 'Checking the actual hash proof on Harold...';
+      const current = job;
+      try {
+        const result = await request('complete', { id: current.id, nonce: event.data.nonce },
+          { signal: requestController.signal });
+        if (generation !== verificationGeneration || job !== current) return;
+        if (result.ok !== true || result.url !== download.dataset.path) throw new Error('Unexpected completion response.');
+        job = null;
+        status.textContent = 'CPU proof verified. No mining rewards were earned. Your download is ready.';
+      } catch (error) {
+        if (generation === verificationGeneration && job === current) await stopTest('CPU test failed: ' + error.message);
+      } finally {
+        if (verificationGeneration === generation) {
+          verifying = false;
+          start.disabled = !enabled || document.hidden || active;
+        }
+      }
+    } else if (event.data.type === 'error' || event.data.type === 'timeout') {
+      await stopTest(event.data.error || 'No proof found within the time limit. You can still download.');
+    } else if (event.data.type === 'progress') {
+      status.textContent = 'Testing WASM hashes. Stop at any time; maximum 10 seconds.';
+    }
+  }
+  start.addEventListener('click', async () => {
+    if (active || verifying || start.disabled || document.hidden) return;
+    start.disabled = true;
+    stop.disabled = false;
+    active = true;
+    const attempt = ++generation;
+    requestController = new AbortController();
+    const controller = requestController;
+    status.textContent = 'Requesting a bounded CPU test...';
+    watchdog = setTimeout(() => { void stopTest('CPU test timed out. You can download without contributing.'); }, 15000);
+    try {
+      const result = await request('jobs', { kind, filename }, { signal: controller.signal });
+      if (attempt !== generation || !active) {
+        await request('cancel', { id: result.id });
+        return;
+      }
+      if (!/^[A-Za-z0-9_-]{32}$/.test(result.id) || !/^[a-f0-9]{64}$/.test(result.challenge) ||
+          result.difficulty !== 12 || result.max_seconds !== 10) throw new Error('Invalid CPU test job.');
+      job = result;
+      const threads = Number(document.getElementById('threads').value);
+      const duty = Number(document.getElementById('duty').value);
+      if (![1, 2].includes(threads) || ![10, 25, 50].includes(duty)) throw new Error('Invalid CPU controls.');
+      for (let i = 0; i < threads; i++) {
+        const worker = new Worker('worker.js');
+        workers.push(worker);
+        worker.onmessage = event => { if (attempt === generation) void handleWorker(event); };
+        worker.onerror = () => { if (attempt === generation) void stopTest('WASM worker could not start. Your download is still available.'); };
+        worker.postMessage({ cmd: 'start', challenge: job.challenge, difficulty: job.difficulty, seconds: 10, duty });
+      }
+      status.textContent = 'CPU test running with ' + threads + ' worker(s).';
+    } catch (error) {
+      if (attempt === generation && active) await stopTest('CPU test unavailable: ' + error.message);
+    }
+  });
+  stop.addEventListener('click', () => { void stopTest(); });
+  download.addEventListener('click', () => { void stopTest(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) void stopTest('Paused by stopping: the tab is hidden. Download remains available.');
+    else start.disabled = !enabled || active || verifying;
+  });
+  window.addEventListener('pagehide', () => { void stopTest(); });
+  async function initialize() {
+    if (!['image', 'audio'].includes(kind) || !/^[\p{L}\p{N}_][\p{L}\p{N}._-]{0,159}$/u.test(filename) ||
+        (kind === 'image' && !/\.(png|jpe?g|webp|gif)$/i.test(filename)) ||
+        (kind === 'audio' && !/^music-[a-f0-9]{32}\.wav$/.test(filename))) {
+      status.textContent = 'Invalid media link.';
+      download.removeAttribute('href');
+      return;
+    }
+    const path = (kind === 'image' ? '/images/' : '/media/') + encodeURIComponent(filename);
+    const downloadPath = '/api/downloads/' + kind + '/' + encodeURIComponent(filename);
+    download.href = backend + downloadPath;
+    download.dataset.path = downloadPath;
+    const preview = document.createElement(kind === 'image' ? 'img' : 'audio');
+    preview.src = backend + path;
+    if (kind === 'image') preview.alt = 'Generated image';
+    else { preview.controls = true; preview.preload = 'metadata'; }
+    document.getElementById('preview').appendChild(preview);
+    try {
+      const config = await request('status');
+      enabled = config.mode === 'pow-test';
+      if (!['off', 'pow-test'].includes(config.mode)) throw new Error('Unknown contribution mode.');
+      start.disabled = !enabled || document.hidden;
+      status.textContent = enabled ? 'Optional CPU test available. Nothing is running.' :
+        'CPU contribution is disabled. Cryptocurrency/Cake rewards are not configured. Download normally.';
+    } catch (error) { status.textContent = 'Contribution unavailable: ' + error.message + ' Download normally.'; }
+  }
+  void initialize();
+  </script>
+</body>
+</html>

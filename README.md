@@ -39,6 +39,30 @@ endpoint is served by Harold on Lubuntu.
   GeoCities HTML share link with a preview/player and download. FTP or page-upload
   errors remain visible; GeoCities may require a Cloudflare check. No ad network
   is connected. Anonymous images still depend on free-provider availability.
+- Download options open `bake.html` on this Render site, separate from GeoCities'
+  injected ads. The preview and "Download without contributing" always remain
+  available; Lubuntu serves the file with an attachment header.
+- The optional worker is a **proof-of-work test**, not a cryptocurrency miner or
+  Cake-credit integration. It is disabled by default. On Lubuntu, setting
+  `HAROLD_DOWNLOAD_WORK_MODE=pow-test` enables the explicitly labeled test.
+  Users must click Start; it defaults to one worker at 10% duty, allows at most
+  two workers at 50% duty each, and stops when a valid proof is found or after
+  at most 10 seconds. Stop, navigating away, hiding the tab, timeout or an error
+  terminates workers. Duty is scheduling time, not a guaranteed CPU-utilization
+  percentage. Mobile users should consider battery and heat.
+- Lubuntu issues expiring challenges and verifies real SHA-256 proofs, not a
+  client countdown. Sessions are bounded and completion is single-use. Because
+  media previews/files are already public and participation is optional, this
+  is not a paywall or enforced mining gate.
+- `hash-wasm` is pinned in the npm lockfile. The build self-hosts its SHA-256
+  UMD bundle (with embedded WASM) and MIT license under `download-assets/`.
+  Run `npm ci --ignore-scripts`, `npm run build`, and `npm test`. The existing
+  Render command `node build.cjs` installs the pinned dependency with `npm ci`
+  if it is missing. No public miner/CDN script, browser-blocker evasion,
+  localhost callback or secret browser wallet credentials are used.
+- Real mining needs a selected currency/algorithm, configured pool and public
+  payout account, plus a tested Lubuntu Stratum bridge and share verification.
+  None is connected; this CPU test earns no money or Cake credits.
 - Learning uses observations of the returned image, not an invented description
   derived only from the prompt. It retains prompt/result concepts and edit lineage,
   not a locally trained image generator. Visual-learning failures remain visible
