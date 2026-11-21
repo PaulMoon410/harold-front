@@ -67,9 +67,42 @@ test('sends chat without asking for or including an API key', async () => {
   assert.equal(JSON.parse(calls[0].options.body).model, 'harold');
   assert.equal(calls[0].options.headers['Content-Type'], 'application/json');
   assert.equal(calls[0].options.headers.Authorization, undefined);
+  assert.equal(JSON.parse(calls[0].options.body).tool_choice, undefined);
   assert.equal(Object.keys(calls[0].options.headers).length, 1);
   assert.equal(app.storage.has('harold_api_key'), false);
   assert.equal(app.storage.has('harold_api_key_base'), false);
+});
+
+test('enables backend-managed tools for authenticated text requests only', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ choices: [{ message: { content: 'I looked that up.' } }] });
+  });
+  app.elements.get('toolsBtn').listeners.click();
+  assert.match(app.elements.get('log').children.at(-1).children[0].textContent, /Save an API key/);
+  assert.equal(app.elements.get('toolsBtn').textContent, 'TOOLS: OFF');
+
+  app.elements.get('quickKey').value = 'test-key';
+  app.elements.get('saveQuickKey').listeners.click();
+  assert.equal(app.elements.get('toolsBtn').textContent, 'TOOLS: AUTO');
+  app.elements.get('input').value = 'Find out more';
+  await app.elements.get('send').listeners.click();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer test-key');
+  assert.equal(JSON.parse(calls[0].options.body).tool_choice, 'auto');
+
+  app.elements.get('sideInput').value = 'Look up another detail';
+  await app.elements.get('sideSend').listeners.click();
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /\/chat\/completions\?self=1$/);
+  assert.equal(calls[1].options.headers.Authorization, 'Bearer test-key');
+  assert.equal(JSON.parse(calls[1].options.body).tool_choice, 'auto');
+
+  app.elements.get('quickKey').value = '';
+  app.elements.get('saveQuickKey').listeners.click();
+  assert.equal(app.elements.get('toolsBtn').textContent, 'TOOLS: OFF');
 });
 
 test('uses the Lubuntu HTTPS API when no endpoint has been saved', async () => {

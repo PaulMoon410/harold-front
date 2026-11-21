@@ -83,6 +83,7 @@
     <button class="btn" id="saveQuickKey" type="button">Save key</button>
     <span id="status" class="status">ready</span>
     <span class="spacer"></span>
+    <button class="btn" id="toolsBtn" type="button" title="Backend-managed tools can increase response time">TOOLS: OFF</button>
     <button class="btn" id="selfBtn" type="button">SELF: OFF</button>
     <button class="btn" id="sideBtn" type="button">SELF TALK ▸</button>
       <button class="btn" id="apiBtn" type="button">API ⚙</button>
@@ -164,6 +165,8 @@
   const clearBtn = document.getElementById('clearBtn');
   const quickKey = document.getElementById('quickKey');
   const saveQuickKey = document.getElementById('saveQuickKey');
+  const toolsBtn = document.getElementById('toolsBtn');
+  let toolsEnabled = Boolean(apiKeyValue);
   const chatPhoto = document.getElementById('chatPhoto');
   const chatPhotoPreview = document.getElementById('chatPhotoPreview');
   const attachPhoto = document.getElementById('attachPhoto');
@@ -343,7 +346,8 @@
           } : {
             model: MODEL,
             messages: history.concat({ role: 'user', content: item.text }).slice(-20),
-            temperature: 0.7
+            temperature: 0.7,
+            ...toolRequestOptions()
           })
         });
 
@@ -458,6 +462,18 @@
       : { 'Content-Type': 'application/json' };
   }
 
+  function updateToolsButton() {
+    toolsBtn.textContent = 'TOOLS: ' + (toolsEnabled ? 'AUTO' : 'OFF');
+    toolsBtn.style.borderColor = toolsEnabled ? '#ffd27a' : '';
+    toolsBtn.style.color = toolsEnabled ? '#ffd27a' : '';
+  }
+
+  updateToolsButton();
+
+  function toolRequestOptions() {
+    return toolsEnabled ? { tool_choice: 'auto' } : {};
+  }
+
   function saveSettings(base, key) {
     if (/[\r\n]/.test(key)) throw new Error('API key cannot contain line breaks.');
     if (key) sessionStorage.setItem('harold_api_key_session', JSON.stringify({ base, key }));
@@ -465,10 +481,28 @@
     if (base === DEFAULT_BASE) localStorage.removeItem('harold_api_base');
     else localStorage.setItem('harold_api_base', base);
     apiBaseValue = base;
+    const hadApiKey = Boolean(apiKeyValue);
     apiKeyValue = key;
     quickKey.value = key;
+    if (!key && toolsEnabled) {
+      toolsEnabled = false;
+      addLine('Tools disabled because the API key was cleared.', 'sys');
+    } else if (key && !hadApiKey) {
+      toolsEnabled = true;
+    }
+    updateToolsButton();
     setStatus('ready', 'ok');
   }
+
+  toolsBtn.addEventListener('click', function () {
+    if (!toolsEnabled && !apiKeyValue) {
+      addLine('Save an API key to enable tools. Tool-enabled requests require server authentication.', 'err');
+      return;
+    }
+    toolsEnabled = !toolsEnabled;
+    updateToolsButton();
+    addLine('Backend-managed tools ' + (toolsEnabled ? 'enabled for text chat.' : 'disabled.'), 'sys');
+  });
 
   quickKey.value = apiKeyValue;
   saveQuickKey.addEventListener('click', function () {
@@ -751,7 +785,12 @@
       const res = await fetch(apiBaseValue + '/chat/completions?self=1', {
         method: 'POST',
         headers: chatHeaders(apiBaseValue),
-        body: JSON.stringify({ model: MODEL, messages: sideHistory.slice(-SIDE_MAX), temperature: 0.7 })
+        body: JSON.stringify({
+          model: MODEL,
+          messages: sideHistory.slice(-SIDE_MAX),
+          temperature: 0.7,
+          ...toolRequestOptions()
+        })
       });
       let data = null;
       try { data = await res.json(); } catch (e) {}

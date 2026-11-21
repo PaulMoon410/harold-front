@@ -15,6 +15,11 @@ endpoint is served by Harold on Lubuntu.
   and sent to that API for text chat and self-talk. Clear the field and save
   to remove it. The public chat endpoint does not require or validate the key;
   entering one does not enable public tool calls.
+- The **TOOLS: AUTO** toggle enables backend-managed automatic tool selection
+  for text chat and self-talk requests to `/v1/chat/completions`. It turns on
+  when an API key is available and is off for keyless public chat. Tool use may
+  increase response time; turn it off if preferred. It does not affect image
+  requests.
 - Attached chat images are previewed locally before sending. Enhance displays
   the processed image and a download link; its output is accessible by link.
 - To create an image, enter a description and select **Create image**. The
