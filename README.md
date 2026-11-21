@@ -43,8 +43,19 @@ endpoint is served by Harold on Lubuntu.
   are supported image concepts, not requests to normalize into ordinary scenes.
   Explicit "draw", "paint", and "sketch" requests do not need the word "picture".
   The vision helper compares the returned scene with the request, reports mismatches
-  beside the preview, and records those as failed examples. No automatic extra
-  generation attempts are enabled; provider fidelity cannot be guaranteed.
+  beside the preview, and records those as failed examples. After external failures
+  or a visual mismatch, Harold can make one local SVG illustration using drawing
+  code from his ordered text providers. This is not photorealistic diffusion.
+  Only visually accepted SVG recipes enter recipe learning; provider fidelity
+  still cannot be guaranteed. No extra paid image-generation retry is made.
+- Natural requests such as "Compose a 30-second dreamy soundtrack" use the
+  authenticated backend and show a playable audio preview plus download link.
+  Local music is synthesized instrumental audio, not vocals or studio recordings.
+  Duration is 1-60 seconds; longer requests are rejected, not silently shortened.
+  Waveform measurements, composition recipes, and subsequent conversation feedback
+  feed Harold's FTP/text-learning pipeline. Measurement is not musical-quality
+  verification or training of an audio model. Music files are accessible by link;
+  local copies expire after seven days.
 - The activity indicator shows observable upload, response, and retry stages.
   The backend does not currently stream its internal reasoning or tool steps.
 - Before switching production, verify the tunnel supports browser CORS and

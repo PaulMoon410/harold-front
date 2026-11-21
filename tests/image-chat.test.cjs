@@ -53,6 +53,41 @@ function setup(fetch, timer = setTimeout, base = 'https://example.test/v1', sess
   return { elements, storage, session };
 }
 
+test('natural instrumental requests route to Harold and render audio with a download link', async () => {
+  const calls = [];
+  const url = '/media/music-' + 'a'.repeat(32) + '.wav';
+  const app = setup(async (endpoint, options) => {
+    calls.push({ endpoint, options });
+    return response({ response: '[Play or download music](' + url + ')' });
+  });
+  app.elements.get('quickKey').value = 'test-key';
+  app.elements.get('saveQuickKey').listeners.click();
+  app.elements.get('input').value = 'Compose a 30-second dreamy soundtrack';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[0].endpoint, 'https://example.test/api/chat');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer test-key');
+  const children = app.elements.get('log').children.at(-1).children;
+  const audio = children.find(child => child.controls);
+  assert.equal(audio.src, 'https://example.test' + url);
+  assert.equal(audio.preload, 'none');
+  assert.ok(children.some(child => child.href === audio.src));
+  const saved = JSON.parse(app.storage.get('harold_main_history'));
+  assert.match(saved.at(-1).content, /Play or download music/);
+});
+
+test('music code and lyric requests retain ordinary text routing', async () => {
+  const calls = [];
+  const app = setup(async (endpoint) => {
+    calls.push(endpoint);
+    return response({ choices: [{ message: { content: 'Requested text.' } }] });
+  });
+  for (const prompt of ['Write a Python script to play music', 'Write song lyrics']) {
+    app.elements.get('input').value = prompt;
+    await app.elements.get('send').listeners.click();
+  }
+  assert.deepEqual(calls, Array(2).fill('https://example.test/v1/chat/completions'));
+});
+
 test('sends chat without asking for or including an API key', async () => {
   const calls = [];
   const app = setup(async (url, options) => {

@@ -50,6 +50,7 @@
   .self { color: #ffd27a; }
   .self::before { content: "self> "; color: #ffd27a; }
   .line img { display: block; max-width: 100%; max-height: 60vh; height: auto; margin: 4px 0 10px; border-radius: 4px; border: 1px solid var(--border); }
+  .line audio { display: block; width: 100%; max-width: 480px; margin: 6px 0; }
   #chatPhotoPreview { max-width: min(240px, 90vw); max-height: 160px; object-fit: contain; margin: 0 14px; border: 1px solid var(--border); border-radius: 4px; }
   .line a { color: var(--accent); }
   /* Side self-talk window */
@@ -223,7 +224,7 @@
       let url;
       try {
         url = new URL(/^(?:www\.|geocities\.ws\/)/i.test(target) ? 'https://' + target : target,
-          target.startsWith('/images/') ? new URL(apiBaseValue).origin : document.baseURI);
+          /^\/(?:images|media)\//.test(target) ? new URL(apiBaseValue).origin : document.baseURI);
       } catch (error) {
         if (!(error instanceof TypeError)) throw error;
       }
@@ -247,6 +248,14 @@
         a.rel = 'noopener noreferrer';
         a.textContent = m[3] || target;
         div.appendChild(a);
+        if (url.origin === new URL(apiBaseValue).origin && /^\/media\/music-[a-f0-9]{32}\.wav$/.test(url.pathname)) {
+          const audio = document.createElement('audio');
+          audio.controls = true;
+          audio.preload = 'none';
+          audio.src = url.href;
+          audio.addEventListener('error', () => { a.textContent = 'Audio preview failed; try downloading the music'; });
+          div.appendChild(audio);
+        }
       }
       offset = m.index + (m[2] || m[4] ? m[0].length : target.length);
     }
@@ -338,9 +347,11 @@
           : 'Message sent; waiting for Harold to respond...');
         const createsImage = /^(?:(?:please|can you|could you)\s+)?(?:generate|create|make|draw|render|paint|sketch|produce)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art)\b/i.test(item.text)
           || /^(?:(?:please|can you|could you)\s+)?(?:draw|paint|sketch)\s+(?:me\s+)?(?!(?:a\s+|the\s+)?conclusions?\b)\S/i.test(item.text);
+        const createsMusic = /^(?:(?:please|can you|could you)\s+)?(?:generate|create|make|compose|produce|write)\s+(?:me\s+)?(?:(?:an?|some)\s+)?(?:[\w-]+\s+){0,6}(?:music|song|soundtrack|instrumental|jingle|beat)\b/i.test(item.text)
+          && !/\b(?:code|script|function|program|lyrics)\b/i.test(item.text);
         const hasImage = history.some(turn => turn.image_id || (turn.role === 'assistant' && /\/images\//.test(turn.content)));
         const refersToImage = hasImage && /\b(?:image|picture|photo|it|that|this)\b/i.test(item.text);
-        const imageChat = Boolean(item.imageId || (!item.selfMode && (createsImage || refersToImage)));
+        const imageChat = Boolean(item.imageId || (!item.selfMode && (createsImage || createsMusic || refersToImage)));
         const endpoint = imageChat ? backend + '/api/chat' : base + '/chat/completions' + (item.selfMode ? '?self=1' : '');
         const res = await fetch(endpoint, {
           method: 'POST',
