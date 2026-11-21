@@ -188,6 +188,46 @@ test('photo enhancement uses the configured backend for uploads and output links
   assert.ok(output.children.some(child => child.src === 'https://example.test' + imagePath));
 });
 
+test('activity shows actual upload and response stages and clears on completion', async () => {
+  let finishUpload;
+  let finishChat;
+  const app = setup(url => new Promise(resolve => {
+    if (url.endsWith('/api/chat/images')) finishUpload = resolve;
+    else finishChat = resolve;
+  }));
+  app.elements.get('chatPhoto').files = [new Blob(['image'], { type: 'image/png' })];
+  const pending = app.elements.get('send').listeners.click();
+  assert.equal(app.elements.get('chatActivity').hidden, false);
+  assert.match(app.elements.get('chatActivityText').textContent, /Uploading image/);
+  finishUpload(response({ ok: true, image_id: 'a'.repeat(32) }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(app.elements.get('chatActivityText').textContent, /waiting for Harold to analyze/);
+  finishChat(response({ response: 'A red image.' }));
+  await pending;
+  assert.equal(app.elements.get('chatActivity').hidden, true);
+});
+
+test('activity clears when a message fails', async () => {
+  const app = setup(async () => { throw new Error('offline'); });
+  app.elements.get('input').value = 'hello';
+  await app.elements.get('send').listeners.click();
+  assert.equal(app.elements.get('chatActivity').hidden, true);
+  assert.equal(app.elements.get('retryQueue').hidden, false);
+});
+
+test('photo activity remains visible while enhancement is pending', async () => {
+  let finish;
+  const app = setup(() => new Promise(resolve => { finish = resolve; }));
+  const picker = app.elements.get('photo');
+  picker.files = [new Blob(['image'], { type: 'image/png' })];
+  const pending = picker.listeners.change();
+  assert.equal(app.elements.get('photoActivity').hidden, false);
+  assert.match(app.elements.get('photoActivityText').textContent, /enhancing photo/);
+  finish(response({ ok: true, url: '/images/enhanced-' + 'a'.repeat(32) + '.jpg' }));
+  await pending;
+  assert.equal(app.elements.get('photoActivity').hidden, true);
+});
+
 test('upload failure pauses the queue with its attachment available for retry', async () => {
   let attempts = 0;
   const app = setup(async url => {

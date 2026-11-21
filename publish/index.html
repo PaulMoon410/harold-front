@@ -41,6 +41,11 @@
   #send { background: #102417; color: var(--accent); border: 1px solid var(--border); border-radius: 4px; padding: 8px 14px; font: inherit; cursor: pointer; height: 38px; }
   #send:hover { border-color: var(--accent); }
   #send:disabled { opacity: 0.5; cursor: not-allowed; }
+  .activity { display: flex; align-items: center; gap: 8px; margin: 6px 14px; color: var(--dim); font-size: 12px; }
+  .activity[hidden] { display: none; }
+  .spinner { width: 14px; height: 14px; flex: none; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
   .self { color: #ffd27a; }
   .self::before { content: "self> "; color: #ffd27a; }
   .line img { display: block; max-width: 100%; max-height: 60vh; height: auto; margin: 4px 0 10px; border-radius: 4px; border: 1px solid var(--border); }
@@ -89,6 +94,8 @@
     <button class="btn" id="photoBtn" type="button" title="Upload photo to enhance">Enhance</button>
     <button id="send" type="button">Send</button>
   </div>
+  <div id="chatActivity" class="activity" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="chatActivityText"></span></div>
+  <div id="photoActivity" class="activity" role="status" hidden><span class="spinner" aria-hidden="true"></span><span id="photoActivityText"></span></div>
   <p id="queueStatus" role="status" style="margin:6px 14px;color:var(--dim);font-size:12px;">Queued messages stay in this tab until sent.</p>
   <div style="display:flex;gap:8px;margin:0 14px;">
     <button class="btn" id="retryQueue" type="button" hidden>Retry message</button>
@@ -144,6 +151,10 @@
   const attachPhoto = document.getElementById('attachPhoto');
   const removePhoto = document.getElementById('removePhoto');
   const attachmentNote = document.getElementById('attachmentNote');
+  const chatActivity = document.getElementById('chatActivity');
+  const chatActivityText = document.getElementById('chatActivityText');
+  const photoActivity = document.getElementById('photoActivity');
+  const photoActivityText = document.getElementById('photoActivityText');
   const queueStatus = document.getElementById('queueStatus');
   const retryQueue = document.getElementById('retryQueue');
   const discardQueue = document.getElementById('discardQueue');
@@ -233,6 +244,11 @@
     clearBtn.disabled = queue.length > 0;
   }
 
+  function showActivity(container, label, text) {
+    label.textContent = text;
+    container.hidden = !text;
+  }
+
   function send() {
     const file = chatPhoto.files && chatPhoto.files[0];
     const text = input.value.trim() || (file ? 'Describe the attached image.' : '');
@@ -271,12 +287,14 @@
         if (item.imageBackend !== backend) item.imageId = null;
         if (item.file && !item.imageId) {
           setStatus('uploading image...', '');
+          showActivity(chatActivity, chatActivityText, 'Uploading image to Harold...');
           const formData = new FormData();
           formData.append('file', item.file);
           const upload = await fetch(backend + '/api/chat/images', { method: 'POST', body: formData });
           let result = null;
           try { result = await upload.json(); } catch (e) { result = null; }
           if (upload.status === 429 && result && typeof result.error === 'string' && /rate limit/i.test(result.error)) {
+            showActivity(chatActivity, chatActivityText, 'Upload rate limited; waiting to retry...');
             updateQueueStatus('Image upload rate limited; retrying in 65 seconds. ' + queue.length + ' message(s) queued.');
             await new Promise(resolve => setTimeout(resolve, 65000));
             continue;
@@ -289,6 +307,9 @@
           item.imageBackend = backend;
         }
         setStatus(item.imageId ? 'analyzing image...' : (item.selfMode ? 'self thinking...' : 'thinking...'), '');
+        showActivity(chatActivity, chatActivityText, item.imageId
+          ? 'Image uploaded; waiting for Harold to analyze it...'
+          : 'Message sent; waiting for Harold to respond...');
         const endpoint = item.imageId ? backend + '/api/chat' : base + '/chat/completions' + (item.selfMode ? '?self=1' : '');
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -311,6 +332,8 @@
           if ((res.status === 503 && /busy|still processing another message/i.test(msg)) ||
               (res.status === 429 && /rate limit/i.test(msg))) {
             const delay = res.status === 429 ? 65000 : 10000;
+            showActivity(chatActivity, chatActivityText, res.status === 429
+              ? 'Rate limited; waiting to retry...' : 'Harold is busy; waiting to retry...');
             updateQueueStatus((res.status === 429 ? 'Rate limited' : 'Harold is busy') +
               '; retrying in ' + delay / 1000 + ' seconds. ' + queue.length + ' message(s) queued.');
             await new Promise(resolve => setTimeout(resolve, delay));
@@ -337,6 +360,7 @@
         setStatus('error', 'bad');
       }
     }
+    showActivity(chatActivity, chatActivityText, '');
     processingQueue = false;
   }
 
@@ -510,6 +534,7 @@
     addLine('Enhance uploaded photo: ' + file.name, 'user');
     photoBusy = true;
     photoBtn.disabled = true;
+    showActivity(photoActivity, photoActivityText, 'Uploading and enhancing photo...');
     note('Improves contrast, color, and sharpness; not AI retouching. Results are accessible by link; do not upload private photos.');
     const body = new FormData();
     body.append('file', file);
@@ -531,6 +556,7 @@
     } finally {
       photoBusy = false;
       photoBtn.disabled = false;
+      showActivity(photoActivity, photoActivityText, '');
       photoInput.value = '';
       input.focus();
     }
