@@ -375,6 +375,31 @@ test('authenticated create button uses image learning and retains the result in 
   assert.match(JSON.parse(calls[1].options.body).history.at(-1).content, /waffle.png/);
 });
 
+test('routes surreal drawing requests without requiring the word picture', async () => {
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push({ url, options });
+    return response({ response: '![dragon](/images/dragon.png)' });
+  });
+  app.elements.get('input').value = 'Draw a teapot dragon with clockwork wings';
+  await app.elements.get('send').listeners.click();
+  assert.equal(calls[0].url, 'https://example.test/api/chat');
+  assert.equal(JSON.parse(calls[0].options.body).prompt, 'Draw a teapot dragon with clockwork wings');
+});
+
+test('displays image fidelity warnings beside the generated preview', async () => {
+  const app = setup(async () => response({
+    ok: true, images: [{ local: '/images/wrong.png', learning: {
+      warning: 'The generated image does not match the request: Humans replaced the waffle.',
+    } }],
+  }));
+  app.elements.get('quickKey').value = 'test-key';
+  app.elements.get('saveQuickKey').listeners.click();
+  app.elements.get('input').value = 'a waffle character';
+  await app.elements.get('generateImage').listeners.click();
+  assert.match(app.elements.get('log').children.at(-1).children.at(-1).textContent, /does not match the request/);
+});
+
 test('does not silently ignore an attached image when creating from text', async () => {
   const app = setup(() => { throw new Error('unexpected request'); });
   app.elements.get('input').value = 'make a picture';

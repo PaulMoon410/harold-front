@@ -336,7 +336,8 @@
         showActivity(chatActivity, chatActivityText, item.imageId
           ? 'Image uploaded; waiting for Harold to analyze it...'
           : 'Message sent; waiting for Harold to respond...');
-        const createsImage = /^(?:(?:please|can you|could you)\s+)?(?:generate|create|make|draw|render|paint|sketch|produce)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art)\b/i.test(item.text);
+        const createsImage = /^(?:(?:please|can you|could you)\s+)?(?:generate|create|make|draw|render|paint|sketch|produce)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|illustration|art)\b/i.test(item.text)
+          || /^(?:(?:please|can you|could you)\s+)?(?:draw|paint|sketch)\s+(?:me\s+)?(?!(?:a\s+|the\s+)?conclusions?\b)\S/i.test(item.text);
         const hasImage = history.some(turn => turn.image_id || (turn.role === 'assistant' && /\/images\//.test(turn.content)));
         const refersToImage = hasImage && /\b(?:image|picture|photo|it|that|this)\b/i.test(item.text);
         const imageChat = Boolean(item.imageId || (!item.selfMode && (createsImage || refersToImage)));
@@ -647,6 +648,7 @@
       let answer = 'Image ready.\n![Generated image](' + url + ')\n[Download](' + url + ')';
       if (image && image.learning) {
         if (image.learning.error) answer += '\n\n' + image.learning.error;
+        else if (image.learning.warning) answer += '\n\n' + image.learning.warning;
         else if (image.learning.memory && /failed|failures|locally|not saved/i.test(image.learning.memory)) {
           answer += '\n\nMemory: ' + image.learning.memory;
         }

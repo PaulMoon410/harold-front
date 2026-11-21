@@ -39,6 +39,12 @@ endpoint is served by Harold on Lubuntu.
   derived only from the prompt. It retains prompt/result concepts and edit lineage,
   not a locally trained image generator. Visual-learning failures remain visible
   without discarding a successfully generated image.
+- Surreal scenes, mystical creatures, hybrid objects, and objects with appendages
+  are supported image concepts, not requests to normalize into ordinary scenes.
+  Explicit "draw", "paint", and "sketch" requests do not need the word "picture".
+  The vision helper compares the returned scene with the request, reports mismatches
+  beside the preview, and records those as failed examples. No automatic extra
+  generation attempts are enabled; provider fidelity cannot be guaranteed.
 - The activity indicator shows observable upload, response, and retry stages.
   The backend does not currently stream its internal reasoning or tool steps.
 - Before switching production, verify the tunnel supports browser CORS and
